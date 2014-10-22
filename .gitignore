@@ -1,5 +1,7 @@
 # MY STUFF TO IGNORE
 .output/*
+user/.output/*
+driver/.output/*
 
 # Windows image file caches
 Thumbs.db
