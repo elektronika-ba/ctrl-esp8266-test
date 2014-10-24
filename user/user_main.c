@@ -2,15 +2,15 @@
 #include "osapi.h"
 
 #include "user_main.h"
-#include "ctrl_app_api.h"
+#include "ctrl_platform.h"
 #include "driver/uart.h"
 
 void user_init(void)
 {
 	uart_init(BIT_RATE_115200, BIT_RATE_115200);
-	uart0_sendStr("CTRL starting...\r\n");
+	uart0_sendStr("CTRL platform starting...\r\n");
 
-	ctrl_app_api_init();
+	ctrl_platform_init();
 
-	uart0_sendStr("CTRL starting... Done.\r\n");
+	uart0_sendStr("CTRL platform started. Now callbacks rule!\r\n");
 }
