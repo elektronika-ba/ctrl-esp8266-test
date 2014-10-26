@@ -1,5 +1,5 @@
-#ifndef __CTRL_APP_API_H
-#define __CTRL_APP_API_H
+#ifndef __CTRL_PLATFORM_H
+#define __CTRL_PLATFORM_H
 
 #include "c_types.h"
 

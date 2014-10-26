@@ -1,5 +1,5 @@
-#ifndef __CTRL_STACK_H
-#define __CTRL_STACK_H
+#ifndef __CTRL_CONFIG_SERVER_H
+#define __CTRL_CONFIG_SERVER_H
 
 #include "c_types.h"
 
