@@ -35,7 +35,7 @@ void ICACHE_FLASH_ATTR sys_status_led_blinker(void *arg)
 void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 {
 	static char prevWifiState = STATION_IDLE;
-	static enum espconn_state prevConnState = ESPCONN_NONE;	
+	static enum espconn_state prevConnState = ESPCONN_NONE;
 
 	unsigned int tmrInterval;
 	enum espconn_state connState = ESPCONN_NONE;
@@ -207,8 +207,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 	os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
 	os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
-	os_sprintf(stationConf.ssid, "%s", "myssid");
-	os_sprintf(stationConf.password, "%s", "mypass");
+	os_sprintf(stationConf.ssid, "%s", "Izvor");
+	//os_sprintf(stationConf.password, "%s", "kuracpalacpravijeznalac");
 
 	wifi_station_set_config(&stationConf);
 #endif

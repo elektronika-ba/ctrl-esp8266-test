@@ -79,29 +79,28 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 
 	if(rxbuff == NULL)
 	{
-		unsigned char msgCount = ctrl_count_messages(data, len);
+		/*unsigned char msgCount = ctrl_count_messages(data, len);
 		if(msgCount>0)
 		{
 			char *msg = os_malloc();
-		}
+		}*/
 	}
 
-
+/*
 	// append to working buffer, allocate memory it if it doesn't exits already
 	if(rxbuff == NULL)
 	{
 		rxbuff = (char *)os_malloc(len);
 	}
 	os_memcpy(rxbuff, data, len);
-
+*/
 	// if we are currently in the authorization mode, process differently
-	if(authMode)
+	if(0) //authMode
 	{
 
 	}
 	else
 	{
-
 		// push the received message to callback
 		if(ctrl_message_extracted != NULL)
 		{
