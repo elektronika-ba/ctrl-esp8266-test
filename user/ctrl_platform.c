@@ -208,7 +208,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 	os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
 	os_sprintf(stationConf.ssid, "%s", "Izvor");
-	//os_sprintf(stationConf.password, "%s", "kuracpalacpravijeznalac");
+	//os_sprintf(stationConf.password, "%s", "kakarakanekasifretina");
 
 	wifi_station_set_config(&stationConf);
 #endif
