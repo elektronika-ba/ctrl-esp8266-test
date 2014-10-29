@@ -5,13 +5,14 @@
 
 typedef struct {
 	unsigned short length;
-	unsigned char header;
+	char header;
 	unsigned long TXsender;
 	char *data;
 } tCtrlMessage;
 
 typedef struct {
 	void(*message_extracted)(tCtrlMessage *);
+	void(*message_acked)(tCtrlMessage *);
 	char(*send_data)(char *, unsigned short);
 	void(*auth_response)(unsigned char);
 } tCtrlCallbacks;
@@ -27,12 +28,14 @@ typedef struct {
 #define CH_RESERVED 		0x80
 
 // private
+static void reverse_buffer(char *, unsigned short);
 static unsigned short ctrl_find_message(char *, unsigned short);
 static void ctrl_stack_process_message(tCtrlMessage *);
 static void ctrl_stack_send_msg(tCtrlMessage *);
 
 // public
 void ctrl_stack_backoff(unsigned char);
+void ctrl_stack_keepalive(unsigned char);
 void ctrl_stack_recv(char *, unsigned short);
 void ctrl_stack_authorize(char *, unsigned long);
 void ctrl_stack_init(tCtrlCallbacks *);

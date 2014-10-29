@@ -168,11 +168,18 @@ static void ICACHE_FLASH_ATTR tcpclient_recv(void *arg, char *pdata, unsigned sh
 	// So no need to get it from the *arg parameter!
 
 	uart0_sendStr("tcpclient_recv(): ");
-	uart0_tx_buffer(pdata, len);
-	uart0_sendStr("\r\n");
+
+	/*unsigned short i;
+	for(i=0; i<len; i++)
+	{
+		char tmp2[10];
+		os_sprintf(tmp2, " 0x%X", pdata[i]);
+		uart0_sendStr(tmp2);
+	}
+	uart0_sendStr(".\r\n");*/
 
 	// forward data to CTRL stack
-	uart0_sendStr("Calling CTRL stack with this data...\r\n");
+	uart0_sendStr("Calling CTRL stack...\r\n");
 	ctrl_stack_recv(pdata, len);
 }
 
@@ -189,7 +196,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 {
 	// do something with msg now
 	char tmp[100];
-	os_sprintf(tmp, "RX MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
+	os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
 	uart0_sendStr(tmp);
 
 	// after we finish, and if we find out that we don't have enough
@@ -199,21 +206,43 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 	// to re-send that message and postpone sending any following messages.
 }
 
+static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
+{
+	// do something with ack now
+	char tmp[100];
+	os_sprintf(tmp, "GOT ACK. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
+	uart0_sendStr(tmp);
+
+	// mark this message as acked in database
+}
+
 static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 {
 	// auth_err = 0x00 (AUTH OK) or 0x01 (AUTH ERROR)
 	if(auth_err)
 	{
-		uart0_sendStr("Authorization error!\r\n");
+		uart0_sendStr("AUTH ERR!\r\n");
 	}
 	else
 	{
-		uart0_sendStr("Authorization success :)\r\n");
+		uart0_sendStr("AUTH OK :)\r\n");
+		ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
 	}
 }
 
 static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 {
+	char tmp[100];
+	uart0_sendStr("SENDING: ");
+	unsigned short i;
+	for(i=0; i<len; i++)
+	{
+		char tmp2[10];
+		os_sprintf(tmp2, " 0x%X", data[i]);
+		uart0_sendStr(tmp2);
+	}
+	uart0_sendStr(".\r\n");
+
 	return espconn_sent(ctrlConn, data, len);
 }
 
@@ -235,13 +264,31 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 	ctrlSetup.serverIp[1] = 47;
 	ctrlSetup.serverIp[2] = 48;
 	ctrlSetup.serverIp[3] = 138;
+
 	ctrlSetup.serverPort = 8000;
+
+	ctrlSetup.baseid[0] = 0x00;
+	ctrlSetup.baseid[1] = 0xcc;
+	ctrlSetup.baseid[2] = 0xa5;
+	ctrlSetup.baseid[3] = 0x39;
+	ctrlSetup.baseid[4] = 0xd1;
+	ctrlSetup.baseid[5] = 0x59;
+	ctrlSetup.baseid[6] = 0xa7;
+	ctrlSetup.baseid[7] = 0xca;
+	ctrlSetup.baseid[8] = 0x30;
+	ctrlSetup.baseid[9] = 0x0a;
+	ctrlSetup.baseid[10] = 0xee;
+	ctrlSetup.baseid[11] = 0x98;
+	ctrlSetup.baseid[12] = 0xde;
+	ctrlSetup.baseid[13] = 0xda;
+	ctrlSetup.baseid[14] = 0x7e;
+	ctrlSetup.baseid[15] = 0x92;
 
 	os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
 	os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
-	os_sprintf(stationConf.ssid, "%s", "Izvor");
-	//os_sprintf(stationConf.password, "%s", "kakarakanekasifretina");
+	os_sprintf(stationConf.ssid, "%s", "myssid");
+	os_sprintf(stationConf.password, "%s", "mypass");
 
 	wifi_station_set_config(&stationConf);
 #endif
@@ -297,6 +344,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		ctrlCallbacks.message_extracted = &ctrl_message_recv_cb;
 		ctrlCallbacks.send_data = &ctrl_send_data_cb;
 		ctrlCallbacks.auth_response = &ctrl_auth_response_cb;
+		ctrlCallbacks.message_acked = &ctrl_message_ack_cb;
 		ctrl_stack_init(&ctrlCallbacks); // we are not saving any unsent data and we always start from TXbase = 1
 
 		uart0_sendStr("Connecting to WIFI...\r\n");

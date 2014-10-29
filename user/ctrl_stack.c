@@ -15,6 +15,19 @@ static unsigned char authMode;
 static tCtrlCallbacks *ctrlCallbacks;
 static unsigned char backoff;
 
+static void ICACHE_FLASH_ATTR reverse_buffer(char *data, unsigned short len)
+{
+	// http://stackoverflow.com/questions/2182002/convert-big-endian-to-little-endian-in-c-without-using-provided-func
+	char *p = data;
+    size_t lo, hi;
+    for(lo=0, hi=len-1; hi>lo; lo++, hi--)
+    {
+        char tmp = p[lo];
+        p[lo] = p[hi];
+        p[hi] = tmp;
+    }
+}
+
 // find first message and return its length. 0 = not found, since CTRL message always has a length (it has at least header byte)!
 static unsigned short ICACHE_FLASH_ATTR ctrl_find_message(char *data, unsigned short len)
 {
@@ -23,6 +36,7 @@ static unsigned short ICACHE_FLASH_ATTR ctrl_find_message(char *data, unsigned s
 	if(len < 2) return 0;
 
 	os_memcpy(&length, data, 2); // hopefully endiannes will match between this compiler and NodeJS on the Cloud server
+	reverse_buffer((char *)&length, 2); // nope, it doesn't so lets fix endianness now
 
 	// entire message available in buffer?
 	if(length <= len)
@@ -47,21 +61,87 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	}
 	else
 	{
+		uart0_sendStr("Regular data received!\r\n");
 		// we received an ACK?
 		if((msg->header) & CH_ACK)
 		{
+			// TODO: stuff
 
+			// push the received ack to callback
+			if(ctrlCallbacks->message_acked != NULL)
+			{
+				ctrlCallbacks->message_acked(msg);
+			}
 		}
-		// fresh message, lets take it and reply with an ACK
+		// fresh message, acknowledge and push it to the app
 		else
 		{
+			// Reply with an ACK on received message. Mind the global backoff variable!
+			tCtrlMessage ack;
+			ack.header = CH_ACK;
+			if(backoff)
+			{
+				ack.header |= CH_BACKOFF;
+			}
+			ack.TXsender = msg->TXsender;
+			//reverse_buffer((char *)&ack.TXsender, 4); // don't forget to fix the endianness...
 
-		}
+			// is this NOT a notification message?
+			if(!(msg->header & CH_NOTIFICATION))
+			{
+				if (msg->TXsender <= TXserver)
+                {
+                    ack.header &= ~CH_PROCESSED;
+                    uart0_sendStr("ERROR: Re-transmitted message!\r\n");
+                }
+                else if (msg->TXsender > (TXserver + 1))
+                {
+					// SYNC PROBLEM! Server sent higher than we expected! This means we missed some previous Message!
+                    // This part should be handled on Server's side.
+                    // Server will flush all data after receiving X successive out-of-sync messages
+                    // and break the connection. Re-sync should then naturally occur
+                    // in auth procedure as there would be nothing pending in queue to send to us.
 
-		// push the received message to callback
-		if(ctrlCallbacks->message_extracted != NULL)
-		{
-			ctrlCallbacks->message_extracted(msg);
+                    ack.header |= CH_OUT_OF_SYNC;
+                    ack.header &= ~CH_PROCESSED;
+                    uart0_sendStr("ERROR: Out-of-sync message!\r\n");
+                }
+                else
+                {
+                	ack.header |= CH_PROCESSED;
+                	TXserver++; // next package we will receive should be +1 of current value, so lets ++
+                }
+
+                // send reply
+                ack.length = 1+4; // fixed ACK length, without payload (data)
+                ctrl_stack_send_msg(&ack);
+
+                uart0_sendStr("ACKed to a msg!\r\n");
+			}
+			else
+			{
+				ack.header |= CH_PROCESSED; // need this for code bellow to execute
+				uart0_sendStr("Didn't ACK because this is a notification-type msg!\r\n");
+			}
+
+			// received a message which is new and as expected?
+			if(ack.header & CH_PROCESSED)
+			{
+				if(msg->header & CH_SYSTEM_MESSAGE)
+				{
+					uart0_sendStr("Got system message - NOT IMPLEMENTED!\r\n");
+				}
+				else
+				{
+					uart0_sendStr("Got fresh message!\r\n");
+
+					// push the received message to callback
+					if(ctrlCallbacks->message_extracted != NULL)
+					{
+						ctrlCallbacks->message_extracted(msg);
+					}
+				}
+			}
 		}
 	}
 }
@@ -101,20 +181,20 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		if(msgLen > 0)
 		{
 			// entire message found in buffer, lets process it
-			//char *msg = (char *)os_malloc(msgLen);
-			//os_memcpy(msg, rxBuff+processedLen, msgLen);
 
 			// Lets parse it into tCtrlMessage type
 			tCtrlMessage msg;
-			os_memcpy(msg.length, rxBuff+processedLen, 2);
-			os_memcpy(msg.header, rxBuff+processedLen+2, 1);
-			os_memcpy(msg.TXsender, rxBuff+processedLen+2+1, 4);
+			os_memcpy((char *)&msg.length, rxBuff+processedLen, 2);
+			reverse_buffer((char *)&msg.length, 2); // lets fix endianness
+			os_memcpy(&msg.header, rxBuff+processedLen+2, 1);
+			os_memcpy((char *)&msg.TXsender, rxBuff+processedLen+2+1, 4);
+			reverse_buffer((char *)&msg.TXsender, 4); // lets fix endianness
 			msg.data = rxBuff+processedLen+2+1+4; // omg
 
 			ctrl_stack_process_message(&msg);
 
-			//os_free(msg);
 			processedLen += msgLen;
+			rxBuffLen = rxBuffLen-processedLen;
 		}
 		else
 		{
@@ -135,9 +215,12 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		}
 	}
 
-	if(shouldFree && rxBuffLen == 0)
+	if(rxBuffLen == 0)
 	{
-		os_free(rxBuff);
+		if(shouldFree)
+		{
+			os_free(rxBuff);
+		}
 		rxBuff = NULL;
 	}
 }
@@ -152,25 +235,49 @@ static void ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 
 	// Length
 	char length[2];
-	os_memcpy(length, msg->length, 2);
+	os_memcpy(length, &msg->length, 2);
+	reverse_buffer(length, 2); // convert to LITTLE ENDIAN!
 	ctrlCallbacks->send_data(length, 2);
 
 	// Header
-	ctrlCallbacks->send_data(&msg->header, 1);
+	ctrlCallbacks->send_data((char *)&msg->header, 1);
 
 	// TXsender
 	char TXsender[4];
-	os_memcpy(TXsender, msg->TXsender, 4);
+	os_memcpy(TXsender, &msg->TXsender, 4);
+	reverse_buffer(TXsender, 4); // convert to LITTLE ENDIAN!
 	ctrlCallbacks->send_data(TXsender, 4);
 
-	// Data
-	ctrlCallbacks->send_data(msg->data, msg->length-5);
+	// Data (if there is data)
+	if(msg->length-5 > 0)
+	{
+		ctrlCallbacks->send_data(msg->data, msg->length-5);
+	}
 }
 
 // this sets or clears the backoff!
 void ICACHE_FLASH_ATTR ctrl_stack_backoff(unsigned char backoff_)
 {
 	backoff = backoff_;
+}
+
+// this enables or disables the keep-alive on server's side
+void ICACHE_FLASH_ATTR ctrl_stack_keepalive(unsigned char keepalive)
+{
+	tCtrlMessage msg;
+	msg.header = CH_SYSTEM_MESSAGE | CH_NOTIFICATION; // lets set NOTIFICATION type also, because we don't need ACKs on this system command, not a VERY big problem if it doesn't get through really
+	msg.TXsender = 0; // since we set NOTIFICATION type, this is not relevant
+
+	char d = 0x03; // disable
+	if(keepalive)
+	{
+		d = 0x02; // enable
+	}
+	msg.data = (char *)&d;
+
+	msg.length = 1+4+1;
+
+	ctrl_stack_send_msg(&msg);
 }
 
 // authorize connection and synchronize TXsender fields in both directions
