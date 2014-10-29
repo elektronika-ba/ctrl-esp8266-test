@@ -9,13 +9,14 @@
 #include "ctrl_config_server.h"
 #include "driver/uart.h"
 
+struct espconn *ctrlConn;
 os_timer_t tmrSysStatusChecker;
 os_timer_t tmrSysStatusLedBlinker;
 tCtrlSetup ctrlSetup;
-struct espconn *ctrlConn;
+tCtrlCallbacks ctrlCallbacks;
 
 // blinking status led according to the status of wifi and tcp connection
-void ICACHE_FLASH_ATTR sys_status_led_blinker(void *arg)
+static void ICACHE_FLASH_ATTR sys_status_led_blinker(void *arg)
 {
 	static unsigned char ledStatusState;
 
@@ -32,7 +33,7 @@ void ICACHE_FLASH_ATTR sys_status_led_blinker(void *arg)
 }
 
 // this function is executed in timer regularly and manages the WiFi connection
-void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
+static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 {
 	static char prevWifiState = STATION_IDLE;
 	static enum espconn_state prevConnState = ESPCONN_NONE;
@@ -134,7 +135,7 @@ static void ICACHE_FLASH_ATTR tcpclient_connect_cb(void *arg)
 	espconn_regist_sentcb(ctrlConn, tcpclient_sent_cb);
 
 	uart0_sendStr("Calling CTRL authorization!\r\n");
-	ctrl_stack_authorize();
+	ctrl_stack_authorize(ctrlSetup.baseid, 1);
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_recon_cb(void *arg, sint8 errType)
@@ -182,6 +183,38 @@ static void ICACHE_FLASH_ATTR tcpclient_sent_cb(void *arg)
 	// So no need to get it from the *arg parameter!
 
 	uart0_sendStr("tcpclient_sent_cb()!\r\n");
+}
+
+static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
+{
+	// do something with msg now
+	char tmp[100];
+	os_sprintf(tmp, "RX MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
+	uart0_sendStr(tmp);
+
+	// after we finish, and if we find out that we don't have enough
+	// storage to process next message that will arive, we can simply
+	// make a call to ctrl_stack_backoff(1); and it will acknowledge to
+	// any following messages with BACKOFF which will tell server
+	// to re-send that message and postpone sending any following messages.
+}
+
+static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
+{
+	// auth_err = 0x00 (AUTH OK) or 0x01 (AUTH ERROR)
+	if(auth_err)
+	{
+		uart0_sendStr("Authorization error!\r\n");
+	}
+	else
+	{
+		uart0_sendStr("Authorization success :)\r\n");
+	}
+}
+
+static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
+{
+	return espconn_sent(ctrlConn, data, len);
 }
 
 // entry point to the ctrl platform
@@ -261,7 +294,10 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		ctrl_connection_recreate();
 
 		// Init the CTRL stack
-		ctrl_stack_init(ctrlSetup.baseid, 1); // we are not saving any unsent data and we always start from TXbase = 1
+		ctrlCallbacks.message_extracted = &ctrl_message_recv_cb;
+		ctrlCallbacks.send_data = &ctrl_send_data_cb;
+		ctrlCallbacks.auth_response = &ctrl_auth_response_cb;
+		ctrl_stack_init(&ctrlCallbacks); // we are not saving any unsent data and we always start from TXbase = 1
 
 		uart0_sendStr("Connecting to WIFI...\r\n");
 

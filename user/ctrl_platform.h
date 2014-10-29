@@ -22,16 +22,18 @@ typedef struct {
 	uint8 baseid[32];
 	uint8 serverIp[4];
 	uint16 serverPort;
-
 } tCtrlSetup;
 
+// private
 static void tcpclient_discon_cb(void *);
 static void tcpclient_recon_cb(void *, sint8);
 static void tcpclient_connect_cb(void *);
 static void tcpclient_recv(void *, char *, unsigned short);
 static void tcpclient_sent_cb(void *);
-
+static char ctrl_send_data_cb(char *, unsigned short);
 static void ctrl_connection_recreate(void);
+
+// public
 void ctrl_platform_init(void);
 
 #endif

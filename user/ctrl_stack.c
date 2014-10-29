@@ -8,83 +8,60 @@
 
 static unsigned long TXbase;
 static unsigned long TXserver;
-static char baseid[32];
+static char *baseid;
 static char *rxBuff = NULL;
 static unsigned short rxBuffLen;
 static unsigned char authMode;
-
-void(*ctrl_message_extracted)(char *) = NULL;
-void(*ctrl_send_data)(char *, unsigned short) = NULL;
-
-// registers a callback fn that will be called with the extracted message
-void ctrl_reg_message_extracted_cb(void *cb)
-{
-	ctrl_message_extracted = cb;
-}
-
-/*
-// will walk through the provided memory space and cound the number of fully available messages within
-static unsigned char ICACHE_FLASH_ATTR ctrl_count_messages(char *data, unsigned short len)
-{
-	unsigned char cnt = 0;
-	char *d = data;
-
-	if(len < 2) return 0;
-
-	while(len > 0)
-	{
-		unsigned short dataLength;
-		os_memcpy(&dataLength, d, 2); // hopefully endiannes will match between this compiler and NodeJS on the Cloud server
-		len -= 2;
-		d += 2;
-
-		// entire message available in buffer?
-		if(dataLength <= len)
-		{
-			len = len - dataLength;
-			d = d + dataLength;
-
-			cnt++;
-		}
-	}
-
-	return cnt;
-}
-*/
+static tCtrlCallbacks *ctrlCallbacks;
+static unsigned char backoff;
 
 // find first message and return its length. 0 = not found, since CTRL message always has a length (it has at least header byte)!
 static unsigned short ICACHE_FLASH_ATTR ctrl_find_message(char *data, unsigned short len)
 {
-	unsigned short dataLength;
+	unsigned short length;
 
 	if(len < 2) return 0;
 
-	os_memcpy(&dataLength, data, 2); // hopefully endiannes will match between this compiler and NodeJS on the Cloud server
+	os_memcpy(&length, data, 2); // hopefully endiannes will match between this compiler and NodeJS on the Cloud server
 
 	// entire message available in buffer?
-	if(dataLength <= len)
+	if(length <= len)
 	{
-		return dataLength + 2; // +2 because Length field of CTRL protocol is 2 bytes long
+		return length + 2; // +2 because Length field of CTRL protocol is 2 bytes long
 	}
 
 	return 0;
 }
 
 // internal function to process extracted message from the received socket stream
-static void ICACHE_FLASH_ATTR ctrl_stack_process_message(char *data, unsigned short len)
+static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 {
 	// if we are currently in the authorization mode, process received data differently
 	if(authMode)
 	{
-		// process answer to our authentication message
-		// TODO:
+		if(ctrlCallbacks->auth_response != NULL)
+		{
+			ctrlCallbacks->auth_response(*(msg->data));
+		}
+		authMode = 0;
 	}
 	else
 	{
-		// push the received message to callback
-		if(ctrl_message_extracted != NULL)
+		// we received an ACK?
+		if((msg->header) & CH_ACK)
 		{
-			ctrl_message_extracted(data, len);
+
+		}
+		// fresh message, lets take it and reply with an ACK
+		else
+		{
+
+		}
+
+		// push the received message to callback
+		if(ctrlCallbacks->message_extracted != NULL)
+		{
+			ctrlCallbacks->message_extracted(msg);
 		}
 	}
 }
@@ -107,7 +84,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 	{
 		// concatenate
 		shouldFree = 1;
-		char *newRxBuff = (char *)malloc(rxBuffLen+len);
+		char *newRxBuff = (char *)os_malloc(rxBuffLen+len);
 		os_memcpy(newRxBuff, rxBuff, rxBuffLen);
 		os_memcpy(newRxBuff+rxBuffLen, data, len);
 		os_free(rxBuff);
@@ -124,10 +101,19 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		if(msgLen > 0)
 		{
 			// entire message found in buffer, lets process it
-			char *msg = (char *)os_malloc(msgLen);
-			os_memcpy(msg, rxBuff+processedLen, msgLen);
-			ctrl_stack_process_message(msg, msgLen);
-			os_free(msg);
+			//char *msg = (char *)os_malloc(msgLen);
+			//os_memcpy(msg, rxBuff+processedLen, msgLen);
+
+			// Lets parse it into tCtrlMessage type
+			tCtrlMessage msg;
+			os_memcpy(msg.length, rxBuff+processedLen, 2);
+			os_memcpy(msg.header, rxBuff+processedLen+2, 1);
+			os_memcpy(msg.TXsender, rxBuff+processedLen+2+1, 4);
+			msg.data = rxBuff+processedLen+2+1+4; // omg
+
+			ctrl_stack_process_message(&msg);
+
+			//os_free(msg);
 			processedLen += msgLen;
 		}
 		else
@@ -135,7 +121,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			// has remaining data in buffer (beginning of another message but not entire message)
 			if(rxBuffLen-processedLen > 0)
 			{
-				newRxBuff = (char *)os_malloc(rxBuffLen-processedLen);
+				char *newRxBuff = (char *)os_malloc(rxBuffLen-processedLen);
 				os_memcpy(newRxBuff, rxBuff+processedLen, rxBuffLen-processedLen);
 				if(shouldFree)
 				{
@@ -157,49 +143,60 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 }
 
 // calls a pre-set callback that sends data to socket
-void ICACHE_FLASH_ATTR ctrl_stack_send(tCtrlMessage *msg)
+static void ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 {
-	if(ctrl_send_data == NULL)
+	if(ctrlCallbacks->send_data == NULL)
 	{
 		return;
 	}
 
 	// Length
-	char dataLength[2];
-	os_memcpy(dataLength, msg->dataLength, 2);
-	ctrl_send_data(dataLength, 2);
+	char length[2];
+	os_memcpy(length, msg->length, 2);
+	ctrlCallbacks->send_data(length, 2);
 
 	// Header
-	ctrl_send_data(msg->header, 1);
+	ctrlCallbacks->send_data(&msg->header, 1);
 
 	// TXsender
 	char TXsender[4];
 	os_memcpy(TXsender, msg->TXsender, 4);
-	ctrl_send_data(TXsender, 4);
+	ctrlCallbacks->send_data(TXsender, 4);
 
-	ctrl_send_data(msg->data, msg->dataLength-5);
+	// Data
+	ctrlCallbacks->send_data(msg->data, msg->length-5);
+}
+
+// this sets or clears the backoff!
+void ICACHE_FLASH_ATTR ctrl_stack_backoff(unsigned char backoff_)
+{
+	backoff = backoff_;
 }
 
 // authorize connection and synchronize TXsender fields in both directions
-void ICACHE_FLASH_ATTR ctrl_stack_authorize()
+void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned long TXbase_)
 {
-	tCtrlMessage msg;
-	msg.dataLength = 1 + 4 + 16;
-	msg.header = 0x00;
-	msg.TXsender = 0; // not important during authentication procedure
-	msg.data = (char *)malloc(16);
+	TXbase = TXbase_;
+	baseid = baseid_;
 
-	if(TXbase == 0)
+	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
+
+	tCtrlMessage msg;
+	msg.length = 1 + 4 + 16;
+	msg.header = 0x00;
+	msg.TXsender = 0; // not relevant during authentication procedure
+	msg.data = baseid; //(char *)os_malloc(16); os_memcpy(dest, baseid, 16);
+
+	if(TXbase == 1)
 	{
 		msg.header |= CH_SYNC;
 	}
 
-	ctrl_stack_send(&msg);
+	ctrl_stack_send_msg(&msg);
 }
 
 // init the CTRL stack
-void ctrl_stack_init(char *baseid_, unsigned long TXbase_)
+void ICACHE_FLASH_ATTR ctrl_stack_init(tCtrlCallbacks *cc)
 {
-	TXbase = TXbase_;
-	os_memcpy(baseid, baseid_, 32);
+	ctrlCallbacks = cc;
 }
