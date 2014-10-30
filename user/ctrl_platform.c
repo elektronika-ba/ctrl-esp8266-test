@@ -9,11 +9,15 @@
 #include "ctrl_config_server.h"
 #include "driver/uart.h"
 
+#include "temperature_logger.h"
+
 struct espconn *ctrlConn;
 os_timer_t tmrSysStatusChecker;
 os_timer_t tmrSysStatusLedBlinker;
 tCtrlSetup ctrlSetup;
 tCtrlCallbacks ctrlCallbacks;
+static char outOfSyncCounter;
+static char ctrlAuthorized;
 
 // blinking status led according to the status of wifi and tcp connection
 static void ICACHE_FLASH_ATTR sys_status_led_blinker(void *arg)
@@ -37,6 +41,7 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 {
 	static char prevWifiState = STATION_IDLE;
 	static enum espconn_state prevConnState = ESPCONN_NONE;
+	static unsigned char prevCtrlAuthorized;
 
 	unsigned int tmrInterval;
 	enum espconn_state connState = ESPCONN_NONE;
@@ -45,11 +50,21 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 		connState = ctrlConn->state;
 	}
 
+	char debugy[50];
+
 	if(connState != ESPCONN_NONE && connState != ESPCONN_CLOSE && wifi_station_get_connect_status() == STATION_GOT_IP) // also check for WIFI state here, because TCP connection might think it is still connected even after WIFI loses the connection with AP
 	{
 		// TCP connection is established, set timer if it has changed since the last time we've set it
-		tmrInterval = 1500;
-		uart0_sendStr("\tSTATE = TCP CONNECTED\r\n");
+		if(ctrlAuthorized)
+		{
+			tmrInterval = 1000;
+			os_sprintf(debugy, "%s", "STATE = TCP CONNECTED, AUTHORIZED");
+		}
+		else
+		{
+			tmrInterval = 2000;
+			os_sprintf(debugy, "%s", "STATE = TCP CONNECTED");
+		}
 	}
 	else
 	{
@@ -57,12 +72,12 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 		if(wifi_station_get_connect_status() == STATION_GOT_IP)
 		{
 			tmrInterval = 500;
-			uart0_sendStr("\tSTATE = WIFI CONNECTED\r\n");
+			os_sprintf(debugy, "%s", "STATE = WIFI CONNECTED");
 
 			// check TCP connection status and initiate connecting procedure if not connected
 			if(connState == ESPCONN_NONE || connState == ESPCONN_CLOSE)
 			{
-				uart0_sendStr("\tSTATE = recreating TCP...\r\n");
+				os_sprintf(debugy, "%s", "STATE = RECREATING TCP");
 				ctrl_connection_recreate();
 				espconn_connect(ctrlConn);
 			}
@@ -71,24 +86,29 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 		else
 		{
 			tmrInterval = 200;
-			uart0_sendStr("\tSTATE = NO WIFI YET\r\n");
+			os_sprintf(debugy, "%s", "STATE = NO WIFI");
 
 			// TCP thinks it is still connected? Disconnect it!
 			if(connState != ESPCONN_NONE && connState != ESPCONN_CLOSE)
 			{
-				uart0_sendStr("\tSTATE = disconnecting TCP...\r\n");
+				os_sprintf(debugy, "%s", "STATE = DISCONNECTING TCP");
 				espconn_disconnect(ctrlConn); // will not cause a problem if ctrlConn is NULL here... also, this fn will os_free() the ctrlConn for us
 			}
 		}
 	}
 
 	// change timer timeout?
-	if(prevWifiState != wifi_station_get_connect_status() || prevConnState != connState)
+	if(prevWifiState != wifi_station_get_connect_status() || prevConnState != connState || prevCtrlAuthorized != ctrlAuthorized)
 	{
+		uart0_sendStr("### ");
+		uart0_sendStr(debugy);
+		uart0_sendStr("\r\n");
+
 		os_timer_disarm(&tmrSysStatusLedBlinker);
 		os_timer_arm(&tmrSysStatusLedBlinker, tmrInterval, 1);
 	}
 
+	prevCtrlAuthorized = ctrlAuthorized;
 	prevWifiState = wifi_station_get_connect_status();
 	prevConnState = connState;
 }
@@ -96,6 +116,11 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 static void ICACHE_FLASH_ATTR ctrl_connection_recreate(void)
 {
 	espconn_disconnect(ctrlConn); // will not cause a problem if ctrlConn is NULL here... also, this fn will os_free() the ctrlConn for us
+
+	// since we didn't implement database QUEUES yet we need to start/stop the logger from generating data when CTRL is offline
+	temperature_logger_stop();
+
+	ctrlAuthorized = 0;
 
 	enum espconn_type linkType = ESPCONN_TCP;
 	ctrlConn = (struct espconn *)os_zalloc(sizeof(struct espconn));
@@ -148,7 +173,9 @@ static void ICACHE_FLASH_ATTR tcpclient_recon_cb(void *arg, sint8 errType)
 	char tmp[50];
 	os_sprintf(tmp, "Reason: %d\r\n", errType);
 	uart0_sendStr(tmp);
-	ctrl_connection_recreate();
+
+	//ctrl_connection_recreate();
+	espconn_disconnect(ctrlConn);
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
@@ -157,8 +184,9 @@ static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	uart0_sendStr("TCP Disconnected! Recreating the connection, will start later...\r\n");
-	ctrl_connection_recreate();
+	uart0_sendStr("TCP Disconnected normally! Recreating the connection, will start later...\r\n");
+	//ctrl_connection_recreate();
+	espconn_disconnect(ctrlConn);
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_recv(void *arg, char *pdata, unsigned short len)
@@ -167,19 +195,9 @@ static void ICACHE_FLASH_ATTR tcpclient_recv(void *arg, char *pdata, unsigned sh
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	uart0_sendStr("tcpclient_recv(): ");
-
-	/*unsigned short i;
-	for(i=0; i<len; i++)
-	{
-		char tmp2[10];
-		os_sprintf(tmp2, " 0x%X", pdata[i]);
-		uart0_sendStr(tmp2);
-	}
-	uart0_sendStr(".\r\n");*/
+	//uart0_sendStr("tcpclient_recv(): ");
 
 	// forward data to CTRL stack
-	uart0_sendStr("Calling CTRL stack...\r\n");
 	ctrl_stack_recv(pdata, len);
 }
 
@@ -189,15 +207,24 @@ static void ICACHE_FLASH_ATTR tcpclient_sent_cb(void *arg)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	uart0_sendStr("tcpclient_sent_cb()!\r\n");
+	//uart0_sendStr("tcpclient_sent_cb()!\r\n");
 }
 
 static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 {
 	// do something with msg now
 	char tmp[100];
-	os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
+	os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u, Data:", msg->length, msg->header, msg->TXsender);
 	uart0_sendStr(tmp);
+
+	unsigned short i;
+	for(i=0; i<msg->length-1-4; i++)
+	{
+		char tmp2[10];
+		os_sprintf(tmp2, " 0x%X", msg->data[i]);
+		uart0_sendStr(tmp2);
+	}
+	uart0_sendStr(".\r\n");
 
 	// after we finish, and if we find out that we don't have enough
 	// storage to process next message that will arive, we can simply
@@ -213,7 +240,37 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 	os_sprintf(tmp, "GOT ACK. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
 	uart0_sendStr(tmp);
 
-	// mark this message as acked in database
+	// hendliraj out_of_sync koji nam server moze poslati
+	if((msg->header) & CH_OUT_OF_SYNC)
+	{
+		uart0_sendStr("Server is complaining that we are OUT OF SYNC!\r\n");
+
+		if(++outOfSyncCounter > 3)
+		{
+			uart0_sendStr("Flushing outgoing queue and restarting connection (later)!\r\n");
+
+			// Flush the outgoing queue, that's all we can do about it really.
+			// TODO:
+
+			espconn_disconnect(ctrlConn);
+		}
+		else
+		{
+			char tmp[30];
+			os_sprintf(tmp, "Re-sending outgoing queue! Attempt %u/3.\r\n", outOfSyncCounter);
+			uart0_sendStr(tmp);
+
+			// Re-send all unacked outgoing messages, maybe that will resolve the sync problem
+			// TODO:
+		}
+	}
+	else
+	{
+		outOfSyncCounter = 0;
+
+		// Mark this message as acked in database
+		// TODO:
+	}
 }
 
 static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
@@ -222,11 +279,16 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 	if(auth_err)
 	{
 		uart0_sendStr("AUTH ERR!\r\n");
+		ctrlAuthorized = 0;
 	}
 	else
 	{
 		uart0_sendStr("AUTH OK :)\r\n");
+		ctrlAuthorized = 1;
 		ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
+
+		// since we didn't implement database QUEUES yet we need to start/stop the logger from generating data when CTRL is offline
+		temperature_logger_start();
 	}
 }
 
@@ -346,6 +408,11 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		ctrlCallbacks.auth_response = &ctrl_auth_response_cb;
 		ctrlCallbacks.message_acked = &ctrl_message_ack_cb;
 		ctrl_stack_init(&ctrlCallbacks); // we are not saving any unsent data and we always start from TXbase = 1
+
+// example app
+		uart0_sendStr("Temperature logger init...\r\n");
+		temperature_logger_init();
+//--
 
 		uart0_sendStr("Connecting to WIFI...\r\n");
 

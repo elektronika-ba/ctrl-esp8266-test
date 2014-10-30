@@ -28,14 +28,15 @@ typedef struct {
 #define CH_RESERVED 		0x80
 
 // private
-static void reverse_buffer(char *, unsigned short);
 static unsigned short ctrl_find_message(char *, unsigned short);
 static void ctrl_stack_process_message(tCtrlMessage *);
 static void ctrl_stack_send_msg(tCtrlMessage *);
 
 // public
+void reverse_buffer(char *, unsigned short);
 void ctrl_stack_backoff(unsigned char);
 void ctrl_stack_keepalive(unsigned char);
+void ctrl_stack_send(char *, unsigned short);
 void ctrl_stack_recv(char *, unsigned short);
 void ctrl_stack_authorize(char *, unsigned long);
 void ctrl_stack_init(tCtrlCallbacks *);

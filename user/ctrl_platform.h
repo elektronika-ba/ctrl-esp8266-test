@@ -13,7 +13,7 @@
 
 #define SETUP_OK_KEY					0xAA	// when settings exist in flash this is the valid-flag
 
-#define TMR_SYS_STATUS_CHECKER_MS		1500	// how often should wifi status checker function execute in ms
+#define TMR_SYS_STATUS_CHECKER_MS		1000	// how often should wifi status checker function execute in ms
 
 typedef struct {
 	char setupOk; // this holds the USER_PARAM_EXISTS value if settings are OK in flash memory

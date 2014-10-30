@@ -15,7 +15,7 @@ static unsigned char authMode;
 static tCtrlCallbacks *ctrlCallbacks;
 static unsigned char backoff;
 
-static void ICACHE_FLASH_ATTR reverse_buffer(char *data, unsigned short len)
+void ICACHE_FLASH_ATTR reverse_buffer(char *data, unsigned short len)
 {
 	// http://stackoverflow.com/questions/2182002/convert-big-endian-to-little-endian-in-c-without-using-provided-func
 	char *p = data;
@@ -53,6 +53,16 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	// if we are currently in the authorization mode, process received data differently
 	if(authMode)
 	{
+		if((msg->header) & CH_SYNC)
+		{
+			TXserver = 0;
+		}
+		else
+		{
+			// reload TXserver from non-volatile memory
+			// TODO: TXserver = load_from_flash_maybe, if we don't server will flush all pending data
+		}
+
 		if(ctrlCallbacks->auth_response != NULL)
 		{
 			ctrlCallbacks->auth_response(*(msg->data));
@@ -61,12 +71,9 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	}
 	else
 	{
-		uart0_sendStr("Regular data received!\r\n");
 		// we received an ACK?
 		if((msg->header) & CH_ACK)
 		{
-			// TODO: stuff
-
 			// push the received ack to callback
 			if(ctrlCallbacks->message_acked != NULL)
 			{
@@ -84,7 +91,6 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 				ack.header |= CH_BACKOFF;
 			}
 			ack.TXsender = msg->TXsender;
-			//reverse_buffer((char *)&ack.TXsender, 4); // don't forget to fix the endianness...
 
 			// is this NOT a notification message?
 			if(!(msg->header & CH_NOTIFICATION))
@@ -92,7 +98,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 				if (msg->TXsender <= TXserver)
                 {
                     ack.header &= ~CH_PROCESSED;
-                    uart0_sendStr("ERROR: Re-transmitted message!\r\n");
+                    //uart0_sendStr("ERROR: Re-transmitted message!\r\n");
                 }
                 else if (msg->TXsender > (TXserver + 1))
                 {
@@ -104,7 +110,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 
                     ack.header |= CH_OUT_OF_SYNC;
                     ack.header &= ~CH_PROCESSED;
-                    uart0_sendStr("ERROR: Out-of-sync message!\r\n");
+                    //uart0_sendStr("ERROR: Out-of-sync message!\r\n");
                 }
                 else
                 {
@@ -116,12 +122,12 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
                 ack.length = 1+4; // fixed ACK length, without payload (data)
                 ctrl_stack_send_msg(&ack);
 
-                uart0_sendStr("ACKed to a msg!\r\n");
+                //uart0_sendStr("ACKed to a msg!\r\n");
 			}
 			else
 			{
 				ack.header |= CH_PROCESSED; // need this for code bellow to execute
-				uart0_sendStr("Didn't ACK because this is a notification-type msg!\r\n");
+				//uart0_sendStr("Didn't ACK because this is a notification-type msg!\r\n");
 			}
 
 			// received a message which is new and as expected?
@@ -129,11 +135,11 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 			{
 				if(msg->header & CH_SYSTEM_MESSAGE)
 				{
-					uart0_sendStr("Got system message - NOT IMPLEMENTED!\r\n");
+					//uart0_sendStr("Got system message - NOT IMPLEMENTED!\r\n");
 				}
 				else
 				{
-					uart0_sendStr("Got fresh message!\r\n");
+					//uart0_sendStr("Got fresh message!\r\n");
 
 					// push the received message to callback
 					if(ctrlCallbacks->message_extracted != NULL)
@@ -223,6 +229,24 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		}
 		rxBuff = NULL;
 	}
+}
+
+// creates a message from data and sends it to Server
+void ICACHE_FLASH_ATTR ctrl_stack_send(char *data, unsigned short len)
+{
+	tCtrlMessage msg;
+	msg.header = 0;
+	msg.TXsender = TXbase;
+
+	TXbase++; // FIND A SMARTER WAY TO DO THIS!!!
+
+	//TXbase++; // lets to it again to cause OUT OF SYNC situation and see what happens. as expected, after 3 fails we will reconnect :) cool, it works
+
+	msg.data = data;
+
+	msg.length = 1+4+len;
+
+	ctrl_stack_send_msg(&msg);
 }
 
 // calls a pre-set callback that sends data to socket
