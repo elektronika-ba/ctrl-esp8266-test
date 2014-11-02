@@ -11,10 +11,12 @@ typedef struct {
 } tCtrlMessage;
 
 typedef struct {
-	void(*message_extracted)(tCtrlMessage *);
+	void(*message_received)(tCtrlMessage *);
 	void(*message_acked)(tCtrlMessage *);
 	char(*send_data)(char *, unsigned short);
 	void(*auth_response)(unsigned char);
+	void(*save_TXserver)(unsigned long);
+	unsigned long(*restore_TXserver)(void);
 } tCtrlCallbacks;
 
 // CTRL Protocol Header Field bits
@@ -30,15 +32,15 @@ typedef struct {
 // private
 static unsigned short ctrl_find_message(char *, unsigned short);
 static void ctrl_stack_process_message(tCtrlMessage *);
-static void ctrl_stack_send_msg(tCtrlMessage *);
+static unsigned char ctrl_stack_send_msg(tCtrlMessage *);
 
 // public
 void reverse_buffer(char *, unsigned short);
 void ctrl_stack_backoff(unsigned char);
 void ctrl_stack_keepalive(unsigned char);
-void ctrl_stack_send(char *, unsigned short);
+unsigned char ctrl_stack_send(char *, unsigned short, unsigned long, unsigned char);
 void ctrl_stack_recv(char *, unsigned short);
-void ctrl_stack_authorize(char *, unsigned long);
+void ctrl_stack_authorize(char *, unsigned char);
 void ctrl_stack_init(tCtrlCallbacks *);
 
 #endif

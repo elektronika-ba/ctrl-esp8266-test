@@ -6,7 +6,6 @@
 
 #include "temperature_logger.h"
 #include "ctrl_platform.h"
-#include "ctrl_stack.h"
 #include "driver/uart.h"
 
 os_timer_t tmr;
@@ -23,25 +22,20 @@ static void ICACHE_FLASH_ATTR temperature_logger_simulate(void *arg)
 	uart0_sendStr(temp);
 
 	// send via CTRL stack to Server
-	ctrl_stack_send((char *)&temper, 4);
-}
-
-// since we didn't implement database QUEUES yet we need to start/stop the logger from generating data when CTRL is offline
-void ICACHE_FLASH_ATTR temperature_logger_start(void)
-{
-	os_timer_disarm(&tmr);
-	os_timer_setfn(&tmr, (os_timer_func_t *)temperature_logger_simulate, NULL);
-	os_timer_arm(&tmr, 5000, 1); // 1 = repeat automatically
-}
-
-// since we didn't implement database QUEUES yet we need to start/stop the logger from generating data when CTRL is offline
-void ICACHE_FLASH_ATTR temperature_logger_stop(void)
-{
-	os_timer_disarm(&tmr);
+	if(ctrl_platform_send((char *)&temper, 4, 0))
+	{
+		uart0_sendStr("* Failed to send, probably DB is full!\r\n");
+	}
+	else
+	{
+		uart0_sendStr("* Temperature sent.\r\n");
+	}
 }
 
 // entry point to the temperature logger app
 void ICACHE_FLASH_ATTR temperature_logger_init(void)
 {
-
+	os_timer_disarm(&tmr);
+	os_timer_setfn(&tmr, (os_timer_func_t *)temperature_logger_simulate, NULL);
+	os_timer_arm(&tmr, 5000, 1); // 1 = repeat automatically
 }

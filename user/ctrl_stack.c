@@ -2,11 +2,11 @@
 #include "osapi.h"
 #include "user_interface.h"
 #include "mem.h"
+#include "espconn.h" // only for ESPCONN_OK enum
 
 #include "ctrl_stack.h"
 #include "driver/uart.h"
 
-static unsigned long TXbase;
 static unsigned long TXserver;
 static char *baseid;
 static char *rxBuff = NULL;
@@ -15,6 +15,7 @@ static unsigned char authMode;
 static tCtrlCallbacks *ctrlCallbacks;
 static unsigned char backoff;
 
+// for changing endianness
 void ICACHE_FLASH_ATTR reverse_buffer(char *data, unsigned short len)
 {
 	// http://stackoverflow.com/questions/2182002/convert-big-endian-to-little-endian-in-c-without-using-provided-func
@@ -61,6 +62,10 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 		{
 			// reload TXserver from non-volatile memory
 			// TODO: TXserver = load_from_flash_maybe, if we don't server will flush all pending data
+			if(ctrlCallbacks->restore_TXserver != NULL)
+			{
+				TXserver = ctrlCallbacks->restore_TXserver();
+			}
 		}
 
 		if(ctrlCallbacks->auth_response != NULL)
@@ -98,14 +103,14 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 				if (msg->TXsender <= TXserver)
                 {
                     ack.header &= ~CH_PROCESSED;
-                    //uart0_sendStr("ERROR: Re-transmitted message!\r\n");
+                    //uart0_sendStr("ERROR: Re-transmitted message, ignoring!\r\n");
                 }
                 else if (msg->TXsender > (TXserver + 1))
                 {
 					// SYNC PROBLEM! Server sent higher than we expected! This means we missed some previous Message!
                     // This part should be handled on Server's side.
-                    // Server will flush all data after receiving X successive out-of-sync messages
-                    // and break the connection. Re-sync should then naturally occur
+                    // Server will flush all data after receiving X successive out-of-sync messages from us,
+                    // and he will break the connection. Re-sync should then naturally occur
                     // in auth procedure as there would be nothing pending in queue to send to us.
 
                     ack.header |= CH_OUT_OF_SYNC;
@@ -115,7 +120,13 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
                 else
                 {
                 	ack.header |= CH_PROCESSED;
-                	TXserver++; // next package we will receive should be +1 of current value, so lets ++
+                	TXserver++; // next package we will receive must be +1 of current value, so lets ++
+
+					// maybe there is a callback defined that will save this value in case we get power loss so server doesn't have to flush the pending queue when connection gets restored
+                	if(ctrlCallbacks->save_TXserver != NULL)
+                	{
+						ctrlCallbacks->save_TXserver(TXserver);
+					}
                 }
 
                 // send reply
@@ -142,9 +153,9 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 					//uart0_sendStr("Got fresh message!\r\n");
 
 					// push the received message to callback
-					if(ctrlCallbacks->message_extracted != NULL)
+					if(ctrlCallbacks->message_received != NULL)
 					{
-						ctrlCallbacks->message_extracted(msg);
+						ctrlCallbacks->message_received(msg);
 					}
 				}
 			}
@@ -157,6 +168,8 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 {
 	// Optimised for RAM memory usage. Reallocating memory only if messages
 	// come in multiple TCP segments (multiple calls of this function for one CTRL message)
+
+	// IMPORTANT TODO: Need to add timer that will flush received buffer in case it doesn't complete it's arrival in next few seconds (10s maybe?)!
 
 	unsigned char shouldFree = 0;
 
@@ -187,6 +200,11 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		if(msgLen > 0)
 		{
 			// entire message found in buffer, lets process it
+
+			// TODO: When everything is finished, add DECRYPTION function here that will decrypt HEADER+TXSENDER+DATA buffer stream.
+			// "Length" part of the message can't be encrypted because message stream might come in segmented TCP packages.
+			// Who cares if they can see the length of the message anyway, right? They can easily calculate the length by simply counting
+			// the bytes that arrive, but the CTRL stack (we) can't rely on that as data might arrive segmented, as previously noted.
 
 			// Lets parse it into tCtrlMessage type
 			tCtrlMessage msg;
@@ -232,51 +250,71 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 }
 
 // creates a message from data and sends it to Server
-void ICACHE_FLASH_ATTR ctrl_stack_send(char *data, unsigned short len)
+unsigned char ICACHE_FLASH_ATTR ctrl_stack_send(char *data, unsigned short len, unsigned long TXbase, unsigned char notification)
 {
 	tCtrlMessage msg;
 	msg.header = 0;
+
+	if(notification)
+	{
+		msg.header |= CH_NOTIFICATION;
+	}
+
 	msg.TXsender = TXbase;
-
-	TXbase++; // FIND A SMARTER WAY TO DO THIS!!!
-
-	//TXbase++; // lets to it again to cause OUT OF SYNC situation and see what happens. as expected, after 3 fails we will reconnect :) cool, it works
 
 	msg.data = data;
 
 	msg.length = 1+4+len;
 
-	ctrl_stack_send_msg(&msg);
+	return ctrl_stack_send_msg(&msg);
 }
 
 // calls a pre-set callback that sends data to socket
-static void ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
+// returns: 1 on error, 0 on success
+static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 {
 	if(ctrlCallbacks->send_data == NULL)
 	{
-		return;
+		return 1;
 	}
 
 	// Length
 	char length[2];
 	os_memcpy(length, &msg->length, 2);
 	reverse_buffer(length, 2); // convert to LITTLE ENDIAN!
-	ctrlCallbacks->send_data(length, 2);
+	if(ctrlCallbacks->send_data(length, 2) != ESPCONN_OK)
+	{
+		return 1; // abort further sending
+	}
+
+	// TODO: Once everything is finished, add ENCRYPTION here. Data to be encrypted is Header+TXsender+Data. Length is not encrypted!
+	// I will probably have to concatenate the data bellow into one byte-stream for encryption procedure to be possible.
 
 	// Header
-	ctrlCallbacks->send_data((char *)&msg->header, 1);
+	if(ctrlCallbacks->send_data((char *)&msg->header, 1) != ESPCONN_OK)
+	{
+		return 1; // abort further sending
+	}
 
 	// TXsender
 	char TXsender[4];
 	os_memcpy(TXsender, &msg->TXsender, 4);
 	reverse_buffer(TXsender, 4); // convert to LITTLE ENDIAN!
-	ctrlCallbacks->send_data(TXsender, 4);
+	if(ctrlCallbacks->send_data(TXsender, 4) != ESPCONN_OK)
+	{
+		return 1; // abort further sending
+	}
 
 	// Data (if there is data)
 	if(msg->length-5 > 0)
 	{
-		ctrlCallbacks->send_data(msg->data, msg->length-5);
+		if(ctrlCallbacks->send_data(msg->data, msg->length-5))
+		{
+			return 1;
+		}
 	}
+
+	return 0;
 }
 
 // this sets or clears the backoff!
@@ -305,9 +343,8 @@ void ICACHE_FLASH_ATTR ctrl_stack_keepalive(unsigned char keepalive)
 }
 
 // authorize connection and synchronize TXsender fields in both directions
-void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned long TXbase_)
+void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned char sync)
 {
-	TXbase = TXbase_;
 	baseid = baseid_;
 
 	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
@@ -318,9 +355,19 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned long TXbase_
 	msg.TXsender = 0; // not relevant during authentication procedure
 	msg.data = baseid; //(char *)os_malloc(16); os_memcpy(dest, baseid, 16);
 
-	if(TXbase == 1)
+	// We have nothing pending to send? (TXbase is 1 in that case)
+	if(sync == 1)
 	{
 		msg.header |= CH_SYNC;
+	}
+
+	// In case we already have something partial in rxBuff, we must free it since the remaining partial data will never arrive.
+	// We will never have this != NULL in case there was a full message available there, because it would be parsed at the time
+	// it arrived into this buffer!
+	if(rxBuff != NULL)
+	{
+		os_free(rxBuff);
+		rxBuff = NULL;
 	}
 
 	ctrl_stack_send_msg(&msg);
