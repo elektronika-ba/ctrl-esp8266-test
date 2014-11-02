@@ -24,7 +24,8 @@ static void ICACHE_FLASH_ATTR temperature_logger_simulate(void *arg)
 	// send via CTRL stack to Server
 	if(ctrl_platform_send((char *)&temper, 4, 0))
 	{
-		uart0_sendStr("* Failed to send, probably DB is full!\r\n");
+		uart0_sendStr("* Failed to send, probably DB is full! TIMER STOP.\r\n");
+		os_timer_disarm(&tmr);
 	}
 	else
 	{

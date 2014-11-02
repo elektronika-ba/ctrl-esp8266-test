@@ -25,7 +25,7 @@
 
 #define SETUP_OK_KEY					0xAA	// when settings exist in flash this is the valid-flag
 
-#define TMR_SYS_STATUS_CHECKER_MS		1000	// how often should wifi status checker function execute in ms
+#define TMR_SYS_STATUS_CHECKER_MS		500		// how often should wifi status checker function execute in ms
 
 #ifdef USE_DATABASE_APPROACH
 	#define TMR_ITEMS_SENDER_MS			500		// sending of all outgoing items when using the database approach

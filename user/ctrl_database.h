@@ -7,7 +7,7 @@
 // Maximum is 255 because of "unsigned char" usage for this value. It can be
 // changed though but the question is why having that long outgoing database
 // table? What's wrong with the connection and why isn't it sending that data?
-#define CTRL_DATABASE_CAPACITY		25
+#define CTRL_DATABASE_CAPACITY		5
 
 // one database entry (row)
 typedef struct {

@@ -34,7 +34,16 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 #ifdef USE_DATABASE_APPROACH
 	static void ICACHE_FLASH_ATTR sys_database_item_sender(void *arg)
 	{
+		// this might not be required after all
+		/*
+		if(!ctrlAuthorized)
+		{
+			return;
+		}
+		*/
+
 		os_timer_disarm(&tmrDatabaseItemSender);
+		uart0_sendStr("TMR item sender off.\r\n");
 
 		// get next item to send from DB, send it and mark as SENT even if it doesn't actually get sent to socket!
 		tDatabaseRow *row = (tDatabaseRow *)ctrl_database_get_next_txbase2server();
@@ -44,6 +53,7 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 
 			// set us up to execute again
 			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+			uart0_sendStr("TMR item sender ON.\r\n");
 		}
 	}
 #endif
@@ -92,7 +102,7 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 	}
 	else
 	{
-		// WIFI connected, but still not TCP connected
+		// WIFI connected
 		if(wifi_station_get_connect_status() == STATION_GOT_IP)
 		{
 			tmrInterval = 500;
@@ -115,9 +125,11 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 			os_sprintf(debugy, "%s", "STATE = NO WIFI");
 
 			// TCP thinks it is still connected? Disconnect it!
-			if(connState == CTRL_TCP_CONNECTED)
+			if(connState != CTRL_TCP_DISCONNECTED)
 			{
-				os_sprintf(debugy, "%s", "STATE = NO WIFI, WILL DISCONNECT TCP");
+				os_sprintf(debugy, "%s", "STATE = NO WIFI, DISCONNECTING TCP");
+				os_timer_disarm(&tmrDatabaseItemSender);
+				espconn_disconnect(ctrlConn);
 				connState = CTRL_TCP_DISCONNECTED;
 			}
 		}
@@ -143,6 +155,7 @@ static void ICACHE_FLASH_ATTR tcp_connection_recreate(void)
 {
 	espconn_disconnect(ctrlConn); // will not cause a problem if ctrlConn is NULL here... also, this fn will os_free() the ctrlConn for us
 	connState = CTRL_TCP_DISCONNECTED;
+	os_timer_disarm(&tmrDatabaseItemSender);
 
 	ctrlAuthorized = 0;
 
@@ -211,6 +224,7 @@ static void ICACHE_FLASH_ATTR tcpclient_recon_cb(void *arg, sint8 errType)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
+	os_timer_disarm(&tmrDatabaseItemSender);
 	connState = CTRL_TCP_DISCONNECTED;
 
 	uart0_sendStr("TCP Reconnect! Will recreate and start later...\r\n");
@@ -225,6 +239,7 @@ static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
+	os_timer_disarm(&tmrDatabaseItemSender);
 	connState = CTRL_TCP_DISCONNECTED;
 
 	uart0_sendStr("TCP Disconnected normally! Will recreate and start later...\r\n");
@@ -290,6 +305,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 		if(++outOfSyncCounter > 3)
 		{
 			uart0_sendStr("Flushing outgoing queue and will restart the connection later!\r\n");
+			os_timer_disarm(&tmrDatabaseItemSender);
 
 			#ifdef USE_DATABASE_APPROACH
 				// Flush the outgoing queue, that's all we can do about it really.
@@ -333,14 +349,17 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 	}
 	else
 	{
-		//uart0_sendStr("AUTH OK :)\r\n");
+		uart0_sendStr("AUTH OK :)\r\n");
 		ctrlAuthorized = 1;
 		ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
 
 		#ifdef USE_DATABASE_APPROACH
-			// start pending item sender, in case we have something to send
-			os_timer_disarm(&tmrDatabaseItemSender);
-			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+			if(ctrl_database_count_unacked_items() > 0)
+			{
+				// start pending item sender, because we have something to send
+				os_timer_disarm(&tmrDatabaseItemSender);
+				os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+			}
 		#endif
 	}
 }
@@ -352,7 +371,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		return ESPCONN_CONN;
 	}
 
-	/*uart0_sendStr("SENDING: ");
+	uart0_sendStr("SENDING: ");
 	unsigned short i;
 	for(i=0; i<len; i++)
 	{
@@ -360,7 +379,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		os_sprintf(tmp2, " 0x%X", data[i]);
 		uart0_sendStr(tmp2);
 	}
-	uart0_sendStr(".\r\n");*/
+	uart0_sendStr(".\r\n");
 
 	return espconn_sent(ctrlConn, data, len);
 }
@@ -437,8 +456,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
 		os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
-		os_sprintf(stationConf.ssid, "%s", "WISPI.AP5a");
-		os_sprintf(stationConf.password, "%s", "aaaaaaaa");
+		os_sprintf(stationConf.ssid, "%s", "asd.AP5a");
+		os_sprintf(stationConf.password, "%s", "asdasd");
 
 		wifi_station_set_config(&stationConf);
 	#endif
