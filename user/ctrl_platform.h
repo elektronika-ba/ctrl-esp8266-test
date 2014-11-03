@@ -28,7 +28,7 @@
 #define TMR_SYS_STATUS_CHECKER_MS		500		// how often should wifi status checker function execute in ms
 
 #ifdef USE_DATABASE_APPROACH
-	#define TMR_ITEMS_SENDER_MS			500		// sending of all outgoing items when using the database approach
+	#define TMR_ITEMS_SENDER_MS			300		// sending of all outgoing items when using the database approach
 #endif
 
 typedef enum {
@@ -36,6 +36,9 @@ typedef enum {
 	CTRL_TCP_CONNECTED,
 	CTRL_TCP_CONNECTING
 } tCtrlConnState;
+
+#define CTRL_STATE_SYNCHRONIZED			0x01	// Base is considered as synchronized after the first successfull authentication with Server
+#define CTRL_STATE_AUTHENTICATED		0x02	// Self explanatory
 
 typedef struct {
 	char setupOk; // this holds the USER_PARAM_EXISTS value if settings are OK in flash memory
@@ -50,7 +53,8 @@ static void tcpclient_recon_cb(void *, sint8);
 static void tcpclient_connect_cb(void *);
 static void tcpclient_recv(void *, char *, unsigned short);
 static void tcpclient_sent_cb(void *);
-static void tcp_connection_recreate(void);
+static void tcp_connection_destroy(void);
+static void tcp_connection_create(void);
 // CTRL stack callbacks
 static void ctrl_message_recv_cb(tCtrlMessage *);
 static void ctrl_message_ack_cb(tCtrlMessage *);

@@ -17,15 +17,17 @@ static void ICACHE_FLASH_ATTR temperature_logger_simulate(void *arg)
 
 	reverse_buffer((char *)&temper, 4); // fix endianness
 
+	/*
 	char temp[50];
 	os_sprintf(temp, "TEMPER: 0x%X\r\n", temper);
 	uart0_sendStr(temp);
+	*/
 
 	// send via CTRL stack to Server
 	if(ctrl_platform_send((char *)&temper, 4, 0))
 	{
-		uart0_sendStr("* Failed to send, probably DB is full! TIMER STOP.\r\n");
-		os_timer_disarm(&tmr);
+		uart0_sendStr("* Failed to send, probably DB is full!\r\n");
+		//os_timer_disarm(&tmr);
 	}
 	else
 	{

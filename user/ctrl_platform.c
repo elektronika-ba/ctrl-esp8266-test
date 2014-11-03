@@ -28,8 +28,11 @@ os_timer_t tmrSysStatusLedBlinker;
 tCtrlSetup ctrlSetup;
 tCtrlCallbacks ctrlCallbacks;
 static char outOfSyncCounter;
-static char ctrlAuthorized;
 static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
+static unsigned char ctrlState = 0x00;
+
+#define isAuthenticated ((ctrlState & CTRL_STATE_AUTHENTICATED))
+#define isSynchronized ((ctrlState & CTRL_STATE_SYNCHRONIZED))
 
 #ifdef USE_DATABASE_APPROACH
 	static void ICACHE_FLASH_ATTR sys_database_item_sender(void *arg)
@@ -39,9 +42,9 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 		os_timer_disarm(&tmrDatabaseItemSender);
 		uart0_sendStr("sys_database_item_sender() - OFF\r\n");
 
-		if(connState != CTRL_TCP_CONNECTED || ctrlAuthorized != 1)
+		if(connState != CTRL_TCP_CONNECTED || !isAuthenticated || !isSynchronized)
 		{
-			uart0_sendStr("sys_database_item_sender() - NO CONN\r\n");
+			uart0_sendStr("sys_database_item_sender() - NO CONN OR NO AUTH OR NOT SYNCED\r\n");
 			return;
 		}
 
@@ -49,7 +52,7 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 		tDatabaseRow *row = (tDatabaseRow *)ctrl_database_get_next_txbase2server();
 		if(row != NULL)
 		{
-			ctrl_stack_send(row->data, row->len, row->TXbase, row->notification);
+			ctrl_stack_send(row->data, row->len, row->TXbase, 0);
 
 			// set us up to execute again
 			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
@@ -80,7 +83,7 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 {
 	static char prevWifiState = STATION_IDLE;
 	static tCtrlConnState prevConnState = CTRL_TCP_DISCONNECTED;
-	static unsigned char prevCtrlAuthorized;
+	static unsigned char prevIsAuthenticated;
 
 	unsigned int tmrInterval;
 
@@ -89,10 +92,10 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 	if(connState == CTRL_TCP_CONNECTED && wifi_station_get_connect_status() == STATION_GOT_IP) // also check for WIFI state here, because TCP connection might think it is still connected even after WIFI loses the connection with AP
 	{
 		// TCP connection is established, set timer if it has changed since the last time we've set it
-		if(ctrlAuthorized)
+		if(isAuthenticated)
 		{
 			tmrInterval = 1000;
-			os_sprintf(debugy, "%s", "STATE = TCP CONNECTED, AUTHORIZED");
+			os_sprintf(debugy, "%s", "STATE = TCP CONNECTED, AUTHENTICATED");
 		}
 		else
 		{
@@ -113,10 +116,11 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 			{
 				os_sprintf(debugy, "%s", "STATE = TCP DISCONNECTED, RECREATING TCP & CONNECTING");
 
-				uart0_sendStr("sys_status_checker() recreating and connecting\r\n");
-				tcp_connection_recreate();
+				uart0_sendStr("sys_status_checker() destroying, creating and connecting\r\n");
+				tcp_connection_destroy();
+				tcp_connection_create();
 
-				espconn_connect(ctrlConn);
+				// override connState previously set by tcp_connection_destroy() with custom so we don't get in here again
 				connState = CTRL_TCP_CONNECTING;
 			}
 		}
@@ -131,20 +135,14 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 			{
 				os_sprintf(debugy, "%s", "STATE = NO WIFI, DISCONNECTING TCP");
 
-				uart0_sendStr("sys_status_checker() stopping sender and disconnecting\r\n");
-				#ifdef USE_DATABASE_APPROACH
-					os_timer_disarm(&tmrDatabaseItemSender);
-				#endif
-
-				ctrlAuthorized = 0;
-				espconn_disconnect(ctrlConn);				
-				connState = CTRL_TCP_DISCONNECTED;
+				uart0_sendStr("sys_status_checker() disconnecting right now\r\n");
+				tcp_connection_destroy();
 			}
 		}
 	}
 
 	// change timer timeout?
-	if(prevWifiState != wifi_station_get_connect_status() || prevConnState != connState || prevCtrlAuthorized != ctrlAuthorized)
+	if(prevWifiState != wifi_station_get_connect_status() || prevConnState != connState || prevIsAuthenticated != isAuthenticated)
 	{
 		uart0_sendStr("### ");
 		uart0_sendStr(debugy);
@@ -154,21 +152,25 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 		os_timer_arm(&tmrSysStatusLedBlinker, tmrInterval, 1);
 	}
 
-	prevCtrlAuthorized = ctrlAuthorized;
+	prevIsAuthenticated = isAuthenticated;
 	prevWifiState = wifi_station_get_connect_status();
 	prevConnState = connState;
 }
 
-static void ICACHE_FLASH_ATTR tcp_connection_recreate(void)
+// closes and destroys current connection
+static void ICACHE_FLASH_ATTR tcp_connection_destroy(void)
 {
-	ctrlAuthorized = 0;
-	#ifdef USE_DATABASE_APPROACH
-		os_timer_disarm(&tmrDatabaseItemSender);
-	#endif
+	uart0_sendStr("tcp_connection_destroy()\r\n");
 
-	espconn_disconnect(ctrlConn); // will not cause a problem if ctrlConn is NULL here... also, this fn will os_free() the ctrlConn for us
+	ctrlState &= ~CTRL_STATE_AUTHENTICATED;
 	connState = CTRL_TCP_DISCONNECTED;
 
+	espconn_disconnect(ctrlConn);
+}
+
+// creates a TCP connection and starts connecting
+static void ICACHE_FLASH_ATTR tcp_connection_create(void)
+{
 	enum espconn_type linkType = ESPCONN_TCP;
 	ctrlConn = (struct espconn *)os_zalloc(sizeof(struct espconn));
 	if(ctrlConn == NULL)
@@ -190,7 +192,8 @@ static void ICACHE_FLASH_ATTR tcp_connection_recreate(void)
 	espconn_regist_connectcb(ctrlConn, tcpclient_connect_cb);
 	espconn_regist_reconcb(ctrlConn, tcpclient_recon_cb);
 
-	uart0_sendStr("TCP connection recreated.\r\n");
+	espconn_connect(ctrlConn);
+	uart0_sendStr("TCP connection created.\r\n");
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_connect_cb(void *arg)
@@ -234,16 +237,11 @@ static void ICACHE_FLASH_ATTR tcpclient_recon_cb(void *arg, sint8 errType)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	#ifdef USE_DATABASE_APPROACH
-		os_timer_disarm(&tmrDatabaseItemSender);
-	#endif
-	connState = CTRL_TCP_DISCONNECTED;
-	ctrlAuthorized = 0;
-
-	uart0_sendStr("TCP Reconnect! Will recreate and start later...\r\n");
-	char tmp[50];
-	os_sprintf(tmp, "Reason: %d\r\n", errType);
+	char tmp[80];
+	os_sprintf(tmp, "tcpclient_recon_cb(), reason: %d, State: %d\r\n", errType, ctrlConn->state);
 	uart0_sendStr(tmp);
+
+	tcp_connection_destroy();
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
@@ -252,13 +250,9 @@ static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	#ifdef USE_DATABASE_APPROACH
-		os_timer_disarm(&tmrDatabaseItemSender);
-	#endif
-	connState = CTRL_TCP_DISCONNECTED;
-	ctrlAuthorized = 0;
+	uart0_sendStr("tcpclient_discon_cb()\r\n");
 
-	uart0_sendStr("TCP Disconnected normally! Will recreate and start later...\r\n");
+	tcp_connection_destroy();
 }
 
 static void ICACHE_FLASH_ATTR tcpclient_recv(void *arg, char *pdata, unsigned short len)
@@ -288,7 +282,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 	char tmp[100];
 	os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u, Data:", msg->length, msg->header, msg->TXsender);
 	uart0_sendStr(tmp);
-
+/*
 	unsigned short i;
 	for(i=0; i<msg->length-1-4; i++)
 	{
@@ -297,7 +291,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 		uart0_sendStr(tmp2);
 	}
 	uart0_sendStr(".\r\n");
-
+*/
 	// after we finish, and if we find out that we don't have enough
 	// storage to process next message that will arive, we can simply
 	// make a call to ctrl_stack_backoff(1); and it will acknowledge to
@@ -320,7 +314,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 
 		if(++outOfSyncCounter > 3)
 		{
-			uart0_sendStr("Flushing outgoing queue and will restart the connection later!\r\n");
+			uart0_sendStr("Flushing outgoing queue (if DB used) and destroying connection!\r\n");
 
 			#ifdef USE_DATABASE_APPROACH
 				os_timer_disarm(&tmrDatabaseItemSender);
@@ -328,8 +322,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 				ctrl_database_delete_all();
 			#endif
 
-			connState = CTRL_TCP_DISCONNECTED;
-			espconn_disconnect(ctrlConn); // do this right here right now
+			tcp_connection_destroy(); // do this right here right now
 		}
 		else
 		{
@@ -350,7 +343,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 		outOfSyncCounter = 0;
 
 		#ifdef USE_DATABASE_APPROACH
-				ctrl_database_ack_row(msg->TXsender);
+			ctrl_database_ack_row(msg->TXsender);
 		#endif
 	}
 }
@@ -361,13 +354,15 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 	if(auth_err)
 	{
 		uart0_sendStr("CTRL AUTH ERR!\r\n");
-		ctrlAuthorized = 0;
+		ctrlState &= ~CTRL_STATE_AUTHENTICATED;
 	}
 	else
 	{
-		uart0_sendStr("AUTH OK :)\r\n");
-		ctrlAuthorized = 1;
+		uart0_sendStr("CTRL AUTH OK!\r\n");
+		ctrlState |= CTRL_STATE_AUTHENTICATED;
 		ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
+
+		ctrlState |= CTRL_STATE_SYNCHRONIZED;
 
 		#ifdef USE_DATABASE_APPROACH
 			if(ctrl_database_count_unacked_items() > 0)
@@ -386,7 +381,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 	{
 		return ESPCONN_CONN;
 	}
-
+/*
 	uart0_sendStr("SENDING: ");
 	unsigned short i;
 	for(i=0; i<len; i++)
@@ -396,7 +391,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		uart0_sendStr(tmp2);
 	}
 	uart0_sendStr(".\r\n");
-
+*/
 	return espconn_sent(ctrlConn, data, len);
 }
 
@@ -419,13 +414,13 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 	#ifdef USE_DATABASE_APPROACH
 		if(notification)
 		{
-			return ctrl_stack_send(data, len, 0, notification); // send notifications immediatelly, no queue
+			return ctrl_stack_send(data, len, 0, 1); // send notifications immediatelly, no queue and no delivery order
 		}
 		else
 		{
 			unsigned char ret = ctrl_database_add_row(data, len);
 			// no point in starting timer if we couldn't add data to DB
-			if(ret == 0 && connState == CTRL_TCP_CONNECTED && ctrlAuthorized == 1)
+			if(ret == 0)
 			{
 				os_timer_disarm(&tmrDatabaseItemSender);
 				os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
@@ -459,7 +454,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 
 		ctrlSetup.serverPort = 8000;
 
-		ctrlSetup.baseid[0] = 0x00;
+		ctrlSetup.baseid[0] = 0xaa;
 		ctrlSetup.baseid[1] = 0xcc;
 		ctrlSetup.baseid[2] = 0xa5;
 		ctrlSetup.baseid[3] = 0x39;
@@ -480,7 +475,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
 		os_sprintf(stationConf.ssid, "%s", "asd.AP5a");
-		os_sprintf(stationConf.password, "%s", "asdasd");
+		os_sprintf(stationConf.password, "%s", "asd");
 
 		wifi_station_set_config(&stationConf);
 	#endif
