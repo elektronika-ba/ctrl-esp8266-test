@@ -94,7 +94,7 @@ void ICACHE_FLASH_ATTR ctrl_database_unsend_all(void)
 }
 
 // returns: 1 on error, 0 on success
-unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(unsigned char notification, char *data, unsigned short len)
+unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(char *data, unsigned short len)
 {
 	if(ctrl_database_count() >= CTRL_DATABASE_CAPACITY)
 	{
@@ -102,7 +102,6 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(unsigned char notification
 	}
 
 	tDatabaseRow *row = (tDatabaseRow *)os_malloc(sizeof(tDatabaseRow));
-	row->notification = notification;
 	row->TXbase = gTXbase;
 	row->data = (char *)os_malloc(len);
 	os_memcpy(row->data, data, len);

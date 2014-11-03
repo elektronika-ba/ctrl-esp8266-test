@@ -11,7 +11,7 @@
 
 // one database entry (row)
 typedef struct {
-	unsigned char notification;
+	//unsigned char notification;
 	unsigned long TXbase;
 	char *data;
 	unsigned short len;
@@ -37,7 +37,7 @@ void ctrl_database_flush_acked(void);
 void ctrl_database_ack_row(unsigned long);
 void ctrl_database_unsend_all(void);
 void ctrl_database_delete_all(void);
-unsigned char ctrl_database_add_row(unsigned char, char *, unsigned short);
+unsigned char ctrl_database_add_row(char *, unsigned short);
 tDatabaseRow * ctrl_database_get_next_txbase2server(void);
 unsigned char ctrl_database_count_unacked_items(void);
 void ctrl_database_init();

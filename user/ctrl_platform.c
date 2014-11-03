@@ -34,16 +34,16 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 #ifdef USE_DATABASE_APPROACH
 	static void ICACHE_FLASH_ATTR sys_database_item_sender(void *arg)
 	{
-		// this might not be required after all
-		/*
-		if(!ctrlAuthorized)
-		{
-			return;
-		}
-		*/
+		uart0_sendStr("sys_database_item_sender()\r\n");
 
 		os_timer_disarm(&tmrDatabaseItemSender);
-		uart0_sendStr("TMR item sender off.\r\n");
+		uart0_sendStr("sys_database_item_sender() - OFF\r\n");
+
+		if(connState != CTRL_TCP_CONNECTED || ctrlAuthorized != 1)
+		{
+			uart0_sendStr("sys_database_item_sender() - NO CONN\r\n");
+			return;
+		}
 
 		// get next item to send from DB, send it and mark as SENT even if it doesn't actually get sent to socket!
 		tDatabaseRow *row = (tDatabaseRow *)ctrl_database_get_next_txbase2server();
@@ -53,7 +53,7 @@ static tCtrlConnState connState = CTRL_TCP_DISCONNECTED;
 
 			// set us up to execute again
 			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
-			uart0_sendStr("TMR item sender ON.\r\n");
+			uart0_sendStr("sys_database_item_sender() - ON\r\n");
 		}
 	}
 #endif
@@ -112,6 +112,8 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 			if(connState == CTRL_TCP_DISCONNECTED)
 			{
 				os_sprintf(debugy, "%s", "STATE = TCP DISCONNECTED, RECREATING TCP & CONNECTING");
+
+				uart0_sendStr("sys_status_checker() recreating and connecting\r\n");
 				tcp_connection_recreate();
 
 				espconn_connect(ctrlConn);
@@ -128,8 +130,14 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 			if(connState != CTRL_TCP_DISCONNECTED)
 			{
 				os_sprintf(debugy, "%s", "STATE = NO WIFI, DISCONNECTING TCP");
-				os_timer_disarm(&tmrDatabaseItemSender);
-				espconn_disconnect(ctrlConn);
+
+				uart0_sendStr("sys_status_checker() stopping sender and disconnecting\r\n");
+				#ifdef USE_DATABASE_APPROACH
+					os_timer_disarm(&tmrDatabaseItemSender);
+				#endif
+
+				ctrlAuthorized = 0;
+				espconn_disconnect(ctrlConn);				
 				connState = CTRL_TCP_DISCONNECTED;
 			}
 		}
@@ -153,11 +161,13 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 
 static void ICACHE_FLASH_ATTR tcp_connection_recreate(void)
 {
+	ctrlAuthorized = 0;
+	#ifdef USE_DATABASE_APPROACH
+		os_timer_disarm(&tmrDatabaseItemSender);
+	#endif
+
 	espconn_disconnect(ctrlConn); // will not cause a problem if ctrlConn is NULL here... also, this fn will os_free() the ctrlConn for us
 	connState = CTRL_TCP_DISCONNECTED;
-	os_timer_disarm(&tmrDatabaseItemSender);
-
-	ctrlAuthorized = 0;
 
 	enum espconn_type linkType = ESPCONN_TCP;
 	ctrlConn = (struct espconn *)os_zalloc(sizeof(struct espconn));
@@ -224,8 +234,11 @@ static void ICACHE_FLASH_ATTR tcpclient_recon_cb(void *arg, sint8 errType)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	os_timer_disarm(&tmrDatabaseItemSender);
+	#ifdef USE_DATABASE_APPROACH
+		os_timer_disarm(&tmrDatabaseItemSender);
+	#endif
 	connState = CTRL_TCP_DISCONNECTED;
+	ctrlAuthorized = 0;
 
 	uart0_sendStr("TCP Reconnect! Will recreate and start later...\r\n");
 	char tmp[50];
@@ -239,8 +252,11 @@ static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
 	// Since we have only one connection, it is stored in ctrlConn.
 	// So no need to get it from the *arg parameter!
 
-	os_timer_disarm(&tmrDatabaseItemSender);
+	#ifdef USE_DATABASE_APPROACH
+		os_timer_disarm(&tmrDatabaseItemSender);
+	#endif
 	connState = CTRL_TCP_DISCONNECTED;
+	ctrlAuthorized = 0;
 
 	uart0_sendStr("TCP Disconnected normally! Will recreate and start later...\r\n");
 }
@@ -305,9 +321,9 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 		if(++outOfSyncCounter > 3)
 		{
 			uart0_sendStr("Flushing outgoing queue and will restart the connection later!\r\n");
-			os_timer_disarm(&tmrDatabaseItemSender);
 
 			#ifdef USE_DATABASE_APPROACH
+				os_timer_disarm(&tmrDatabaseItemSender);
 				// Flush the outgoing queue, that's all we can do about it really.
 				ctrl_database_delete_all();
 			#endif
@@ -401,14 +417,21 @@ static unsigned long ICACHE_FLASH_ATTR ctrl_restore_TXserver_cb(void)
 unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short len, unsigned char notification)
 {
 	#ifdef USE_DATABASE_APPROACH
-		unsigned char ret = ctrl_database_add_row(notification, data, len);
-		// no point in starting timer if we couldn't add data to DB
-		if(ret == 0)
+		if(notification)
 		{
-			os_timer_disarm(&tmrDatabaseItemSender);
-			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+			return ctrl_stack_send(data, len, 0, notification); // send notifications immediatelly, no queue
 		}
-		return ret;
+		else
+		{
+			unsigned char ret = ctrl_database_add_row(data, len);
+			// no point in starting timer if we couldn't add data to DB
+			if(ret == 0 && connState == CTRL_TCP_CONNECTED && ctrlAuthorized == 1)
+			{
+				os_timer_disarm(&tmrDatabaseItemSender);
+				os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+			}
+			return ret;
+		}
 	#else
 		TXbase++;
 		return ctrl_stack_send(data, len, TXbase, notification);
