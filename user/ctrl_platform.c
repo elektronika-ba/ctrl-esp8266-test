@@ -21,7 +21,7 @@
 #else
 	static unsigned long TXbase;
 #endif
-	
+
 static unsigned long gTXserver;
 struct espconn *ctrlConn;
 os_timer_t tmrSysStatusChecker;
@@ -88,7 +88,7 @@ static void ICACHE_FLASH_ATTR sys_status_checker(void *arg)
 
 	unsigned int tmrInterval;
 
-	char debugy[75];
+	char debugy[100];
 
 	if(connState == CTRL_TCP_CONNECTED && wifi_station_get_connect_status() == STATION_GOT_IP) // also check for WIFI state here, because TCP connection might think it is still connected even after WIFI loses the connection with AP
 	{
@@ -252,7 +252,6 @@ static void ICACHE_FLASH_ATTR tcpclient_discon_cb(void *arg)
 	// So no need to get it from the *arg parameter!
 
 	uart0_sendStr("tcpclient_discon_cb()\r\n");
-
 	tcp_connection_destroy();
 }
 
@@ -305,7 +304,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 {
 	// do something with ack now
 	char tmp[100];
-	os_sprintf(tmp, "GOT ACK. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
+	os_sprintf(tmp, "GOT ACK on TXsender: %u\r\n", msg->TXsender);
 	uart0_sendStr(tmp);
 
 	// hendliraj out_of_sync koji nam server moze poslati
@@ -313,8 +312,10 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 	{
 		uart0_sendStr("Server is complaining that we are OUT OF SYNC!\r\n");
 
-		if(++outOfSyncCounter > 3)
+		if(++outOfSyncCounter >= 3)
 		{
+			outOfSyncCounter = 0;
+
 			#ifdef USE_DATABASE_APPROACH
 				uart0_sendStr("Out of sync (3): Flushing outgoing queue.\r\n");
 
@@ -328,11 +329,13 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 		}
 		else
 		{
-			char tmp[30];
-			os_sprintf(tmp, "Re-sending outgoing queue! Attempt %u/3.\r\n", outOfSyncCounter);
+			char tmp[50];
+			os_sprintf(tmp, "Out of sync report %u/3.\r\n", outOfSyncCounter);
 			uart0_sendStr(tmp);
 
 			#ifdef USE_DATABASE_APPROACH
+				uart0_sendStr("Re-sending outgoing queue...\r\n");
+
 				// Re-send all unacked outgoing messages, maybe that will resolve the sync problem
 				os_timer_disarm(&tmrDatabaseItemSender);
 				ctrl_database_unsend_all();
@@ -419,10 +422,20 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 	#ifdef USE_DATABASE_APPROACH
 		if(notification)
 		{
+			if(connState != CTRL_TCP_CONNECTED || !isAuthenticated)
+			{
+				return 1;
+			}
+
 			return ctrl_stack_send(data, len, 0, 1); // send notifications immediatelly, no queue and no delivery order
 		}
 		else
 		{
+			if(!isSynchronized)
+			{
+				return 1;
+			}
+
 			unsigned char ret = ctrl_database_add_row(data, len);
 			// no point in starting timer if we couldn't add data to DB
 			if(ret == 0)
@@ -433,8 +446,14 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 			return ret;
 		}
 	#else
+		if(connState != CTRL_TCP_CONNECTED || !isAuthenticated)
+		{
+			return 1;
+		}
+
+		unsigned char ret = ctrl_stack_send(data, len, TXbase, notification);
 		TXbase++;
-		return ctrl_stack_send(data, len, TXbase, notification);
+		return ret;
 	#endif
 }
 
@@ -459,6 +478,27 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 
 		ctrlSetup.serverPort = 8000;
 
+		/*
+		// Public Base for testing
+		ctrlSetup.baseid[0] = 0x57;
+		ctrlSetup.baseid[1] = 0x3f;
+		ctrlSetup.baseid[2] = 0xcd;
+		ctrlSetup.baseid[3] = 0xc4;
+		ctrlSetup.baseid[4] = 0x87;
+		ctrlSetup.baseid[5] = 0xb6;
+		ctrlSetup.baseid[6] = 0x02;
+		ctrlSetup.baseid[7] = 0xbc;
+		ctrlSetup.baseid[8] = 0xb1;
+		ctrlSetup.baseid[9] = 0x34;
+		ctrlSetup.baseid[10] = 0x11;
+		ctrlSetup.baseid[11] = 0xf9;
+		ctrlSetup.baseid[12] = 0x21;
+		ctrlSetup.baseid[13] = 0xec;
+		ctrlSetup.baseid[14] = 0x30;
+		ctrlSetup.baseid[15] = 0xa9;
+		*/
+
+		// Beehive monitoring Base
 		ctrlSetup.baseid[0] = 0xaa;
 		ctrlSetup.baseid[1] = 0xcc;
 		ctrlSetup.baseid[2] = 0xa5;
@@ -479,8 +519,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
 		os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
-		os_sprintf(stationConf.ssid, "%s", "asd.AP5a");
-		os_sprintf(stationConf.password, "%s", "asd");
+		os_sprintf(stationConf.ssid, "%s", "aaa.AP5a");
+		os_sprintf(stationConf.password, "%s", "aaa");
 
 		wifi_station_set_config(&stationConf);
 	#endif

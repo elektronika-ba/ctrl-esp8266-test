@@ -15,7 +15,7 @@
 // delivered to Server because they WILL BE.
 // When not defined, you need to handle acknowledging current
 // transmission and re-transmitting it if something happens.
-#define USE_DATABASE_APPROACH
+//#define USE_DATABASE_APPROACH
 
 // User parameters sector addresses (from documentation, valid is 0~3). Each sector holds 4KB
 #define USER_PARAM_SEC_0				0

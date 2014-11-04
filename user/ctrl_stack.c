@@ -166,6 +166,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 // data expecter timeout, in case it triggers things aren't going well
 static void ICACHE_FLASH_ATTR data_expecter_timeout(void *arg)
 {
+	uart0_sendStr("data_expecter_timeout() - FLUSH RX BUFF\r\n");
 	if(rxBuff != NULL)
 	{
 		os_free(rxBuff);
