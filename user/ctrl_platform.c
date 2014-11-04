@@ -21,7 +21,8 @@
 #else
 	static unsigned long TXbase;
 #endif
-
+	
+static unsigned long gTXserver;
 struct espconn *ctrlConn;
 os_timer_t tmrSysStatusChecker;
 os_timer_t tmrSysStatusLedBlinker;
@@ -44,7 +45,7 @@ static unsigned char ctrlState = 0x00;
 
 		if(connState != CTRL_TCP_CONNECTED || !isAuthenticated || !isSynchronized)
 		{
-			uart0_sendStr("sys_database_item_sender() - NO CONN OR NO AUTH OR NOT SYNCED\r\n");
+			uart0_sendStr("sys_database_item_sender() - NO CONN, AUTH OR NOT SYNCED\r\n");
 			return;
 		}
 
@@ -314,14 +315,15 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 
 		if(++outOfSyncCounter > 3)
 		{
-			uart0_sendStr("Flushing outgoing queue (if DB used) and destroying connection!\r\n");
-
 			#ifdef USE_DATABASE_APPROACH
+				uart0_sendStr("Out of sync (3): Flushing outgoing queue.\r\n");
+
 				os_timer_disarm(&tmrDatabaseItemSender);
 				// Flush the outgoing queue, that's all we can do about it really.
 				ctrl_database_delete_all();
 			#endif
 
+			uart0_sendStr("Out of sync (3): Destroying connection!\r\n");
 			tcp_connection_destroy(); // do this right here right now
 		}
 		else
@@ -399,12 +401,15 @@ static void ICACHE_FLASH_ATTR ctrl_save_TXserver_cb(unsigned long TXserver)
 {
 	// we don't store TXserver in FLASH as it would wear out the FLASH memory... don't know how to handle this. Maybe save every other value and in different locations?
 	// by saving every other value system would still work since it is configured to try re-sending 3 times until flushing all data
+
+	gTXserver = TXserver; // for now, store it in RAM
 }
 
 static unsigned long ICACHE_FLASH_ATTR ctrl_restore_TXserver_cb(void)
 {
 	// since we don't store it, we don't load it either :-)
-	return 0; // return zero (default) as if CTRL Server told us to re-sync. in case it had pending messages we would send him OUT_OF_SYNC 3 times and server will then flush and break the connection, and we would reconnect.
+
+	return gTXserver; // for now, return the last one we had from RAM
 }
 
 // all user CTRL messages is sent to Server through this function

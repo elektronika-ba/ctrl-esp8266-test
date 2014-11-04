@@ -7,6 +7,8 @@
 #include "ctrl_stack.h"
 #include "driver/uart.h"
 
+os_timer_t tmrDataExpecter;
+
 static unsigned long TXserver;
 static char *baseid;
 static char *rxBuff = NULL;
@@ -60,8 +62,6 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 		}
 		else
 		{
-			// reload TXserver from non-volatile memory
-			// TODO: TXserver = load_from_flash_maybe, if we don't server will flush all pending data
 			if(ctrlCallbacks->restore_TXserver != NULL)
 			{
 				TXserver = ctrlCallbacks->restore_TXserver();
@@ -163,13 +163,21 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	}
 }
 
+// data expecter timeout, in case it triggers things aren't going well
+static void ICACHE_FLASH_ATTR data_expecter_timeout(void *arg)
+{
+	if(rxBuff != NULL)
+	{
+		os_free(rxBuff);
+		rxBuff = NULL;
+	}
+}
+
 // all socket data which is received is flushed into this function
 void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 {
 	// Optimised for RAM memory usage. Reallocating memory only if messages
 	// come in multiple TCP segments (multiple calls of this function for one CTRL message)
-
-	// IMPORTANT TODO: Need to add timer that will flush received buffer in case it doesn't complete it's arrival in next few seconds (10s maybe?)!
 
 	unsigned char shouldFree = 0;
 
@@ -200,6 +208,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		if(msgLen > 0)
 		{
 			// entire message found in buffer, lets process it
+			os_timer_disarm(&tmrDataExpecter);
 
 			// TODO: When everything is finished, add DECRYPTION function here that will decrypt HEADER+TXSENDER+DATA buffer stream.
 			// "Length" part of the message can't be encrypted because message stream might come in segmented TCP packages.
@@ -225,6 +234,8 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			// has remaining data in buffer (beginning of another message but not entire message)
 			if(rxBuffLen-processedLen > 0)
 			{
+				os_timer_arm(&tmrDataExpecter, TMR_DATA_EXPECTER_MS, 0); // 0 = do not repeat automatically
+
 				char *newRxBuff = (char *)os_malloc(rxBuffLen-processedLen);
 				os_memcpy(newRxBuff, rxBuff+processedLen, rxBuffLen-processedLen);
 				if(shouldFree)
@@ -241,6 +252,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 
 	if(rxBuffLen == 0)
 	{
+		//os_timer_disarm(&tmrDataExpecter); // TODO: see if required here as well?
 		if(shouldFree)
 		{
 			os_free(rxBuff);
@@ -353,7 +365,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned char sync)
 	msg.length = 1 + 4 + 16;
 	msg.header = 0x00;
 	msg.TXsender = 0; // not relevant during authentication procedure
-	msg.data = baseid; //(char *)os_malloc(16); os_memcpy(dest, baseid, 16);
+	msg.data = baseid; //(char *)os_malloc(16); os_memcpy(msg.data, baseid, 16);
 
 	// We have nothing pending to send? (TXbase is 1 in that case)
 	if(sync == 1)
@@ -366,6 +378,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned char sync)
 	// it arrived into this buffer!
 	if(rxBuff != NULL)
 	{
+		os_timer_disarm(&tmrDataExpecter);
 		os_free(rxBuff);
 		rxBuff = NULL;
 	}
@@ -377,4 +390,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned char sync)
 void ICACHE_FLASH_ATTR ctrl_stack_init(tCtrlCallbacks *cc)
 {
 	ctrlCallbacks = cc;
+
+	os_timer_disarm(&tmrDataExpecter);
+	os_timer_setfn(&tmrDataExpecter, (os_timer_func_t *)data_expecter_timeout, NULL);
 }

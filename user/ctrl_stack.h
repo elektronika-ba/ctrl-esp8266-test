@@ -3,6 +3,8 @@
 
 #include "c_types.h"
 
+#define TMR_DATA_EXPECTER_MS	10000 // for how long should we expect data from socket in case it didn't fully arrive
+
 typedef struct {
 	unsigned short length;
 	char header;
