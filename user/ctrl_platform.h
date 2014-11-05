@@ -25,36 +25,36 @@
 
 #define SETUP_OK_KEY					0xAA	// when settings exist in flash this is the valid-flag
 
-#define TMR_SYS_STATUS_CHECKER_MS		500		// how often should wifi status checker function execute in ms
-
 #ifdef USE_DATABASE_APPROACH
 	#define TMR_ITEMS_SENDER_MS			300		// sending of all outgoing items when using the database approach
 #endif
 
 typedef enum {
+	CTRL_WIFI_CONNECTING,
+	CTRL_WIFI_CONNECTING_ERROR,
 	CTRL_TCP_DISCONNECTED,
+	CTRL_TCP_CONNECTING,
+	CTRL_TCP_CONNECTING_ERROR,
 	CTRL_TCP_CONNECTED,
-	CTRL_TCP_CONNECTING
+	CTRL_AUTHENTICATED,
+	CTRL_AUTHENTICATION_ERROR
 } tCtrlConnState;
 
-#define CTRL_STATE_SYNCHRONIZED			0x01	// Base is considered as synchronized after the first successfull authentication with Server
-#define CTRL_STATE_AUTHENTICATED		0x02	// Self explanatory
-
 typedef struct {
-	char setupOk; // this holds the USER_PARAM_EXISTS value if settings are OK in flash memory
+	char setupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
 	char baseid[32];
 	char serverIp[4];
 	unsigned int serverPort;
 } tCtrlSetup;
 
 // private
-static void tcpclient_discon_cb(void *);
-static void tcpclient_recon_cb(void *, sint8);
-static void tcpclient_connect_cb(void *);
-static void tcpclient_recv(void *, char *, unsigned short);
-static void tcpclient_sent_cb(void *);
-static void tcp_connection_destroy(void);
-static void tcp_connection_create(void);
+static void ctrl_platform_check_ip(void *);
+static void ctrl_platform_recon_cb(void *, sint8);
+static void ctrl_platform_sent_cb(void *);
+static void ctrl_platform_recv_cb(void *, char *, unsigned short);
+static void ctrl_platform_connect_cb(void *);
+static void ctrl_platform_discon_cb(void *);
+static void ctrl_status_led_blinker(void *);
 // CTRL stack callbacks
 static void ctrl_message_recv_cb(tCtrlMessage *);
 static void ctrl_message_ack_cb(tCtrlMessage *);

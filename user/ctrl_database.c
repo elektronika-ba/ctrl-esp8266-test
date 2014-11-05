@@ -34,7 +34,7 @@ void ICACHE_FLASH_ATTR ctrl_database_ack_row(unsigned long TXbase)
 
 			char stmp[50];
 			os_sprintf(stmp, "DB acked on TXbase = %u\r\n", TXbase);
-			uart0_sendStr(stmp);
+			//uart0_sendStr(stmp);
 
 			break;
 		}
@@ -54,7 +54,7 @@ void ICACHE_FLASH_ATTR ctrl_database_ack_row(unsigned long TXbase)
 // returns next database row from database, and marks it as SENT
 tDatabaseRow * ICACHE_FLASH_ATTR ctrl_database_get_next_txbase2server(void)
 {
-	uart0_sendStr("DB selecting next: ");
+	//uart0_sendStr("DB selecting next: ");
 
 	tNode *tmp = ctrlDatabase;
 	while(tmp != NULL)
@@ -65,32 +65,32 @@ tDatabaseRow * ICACHE_FLASH_ATTR ctrl_database_get_next_txbase2server(void)
 
 			char stmp[50];
 			os_sprintf(stmp, "TXbase = %u\r\n", (tmp->row)->TXbase);
-			uart0_sendStr(stmp);
+			//uart0_sendStr(stmp);
 
 			return tmp->row;
 		}
 		tmp = tmp->next;
 	}
 
-	uart0_sendStr("NO NEXT!\r\n");
+	//uart0_sendStr("NO NEXT!\r\n");
 
 	return NULL;
 }
 
 void ICACHE_FLASH_ATTR ctrl_database_unsend_all(void)
 {
-	uart0_sendStr("DB mark all as unsent:");
+	//uart0_sendStr("DB mark all as unsent:");
 	tNode *tmp = ctrlDatabase;
 	while(tmp != NULL)
 	{
 		char stmp[20];
 		os_sprintf(stmp, " %u", (tmp->row)->TXbase);
-		uart0_sendStr(stmp);
+		//uart0_sendStr(stmp);
 
 		(tmp->row)->sent = 0;
 		tmp = tmp->next;
 	}
-	uart0_sendStr(".\r\n");
+	//uart0_sendStr(".\r\n");
 }
 
 // returns: 1 on error, 0 on success
@@ -114,7 +114,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(char *data, unsigned short
 
 	char stmp[50];
 	os_sprintf(stmp, "DB added new row TXbase = %u\r\n", gTXbase-1);
-	uart0_sendStr(stmp);
+	//uart0_sendStr(stmp);
 
 	return ctrl_database_add_node(row);
 }
@@ -122,7 +122,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(char *data, unsigned short
 // flushing acknowledged messages until we get to the first unacknowledged (or 'till the end), then we stop
 void ICACHE_FLASH_ATTR ctrl_database_flush_acked(void)
 {
-	uart0_sendStr("DB flush acked:");
+	//uart0_sendStr("DB flush acked:");
 
 	tNode *tmp = ctrlDatabase;
 	while(tmp != NULL)
@@ -131,14 +131,14 @@ void ICACHE_FLASH_ATTR ctrl_database_flush_acked(void)
 		{
 			char stmp[20];
 			os_sprintf(stmp, " %u", (tmp->row)->TXbase);
-			uart0_sendStr(stmp);
+			//uart0_sendStr(stmp);
 
 			tmp = ctrl_database_delete_by_TXbase((tmp->row)->TXbase); // returns the element which pointed to the deleted one so we can continue
 
 			// this should never be NULL in this loop, but who knows...
 			if(tmp == NULL)
 			{
-				uart0_sendStr(".\r\n");
+				//uart0_sendStr(".\r\n");
 				return;
 			}
 		}
@@ -149,7 +149,7 @@ void ICACHE_FLASH_ATTR ctrl_database_flush_acked(void)
 
 		tmp = tmp->next;
 	}
-	uart0_sendStr(".\r\n");
+	//uart0_sendStr(".\r\n");
 }
 
 // count number of elements in database
@@ -184,7 +184,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_count_unacked_items(void)
 
 	char stmp[50];
 	os_sprintf(stmp, "DB count unacked: %u\r\n", count);
-	uart0_sendStr(stmp);
+	//uart0_sendStr(stmp);
 
 	return count;
 }
@@ -194,7 +194,7 @@ void ICACHE_FLASH_ATTR ctrl_database_delete_all(void)
 	tNode *pointer = ctrlDatabase;
 	tNode *next;
 
-	uart0_sendStr("DB deleting all.\r\n");
+	//uart0_sendStr("DB deleting all.\r\n");
 
 	while(pointer != NULL)
 	{
@@ -266,7 +266,7 @@ static tNode * ICACHE_FLASH_ATTR ctrl_database_delete_by_TXbase(unsigned long TX
 
 	char stmp[50];
 	os_sprintf(stmp, "DB deleted TXbase = %u\r\n", TXbase);
-	uart0_sendStr(stmp);
+	//uart0_sendStr(stmp);
 
 	return pointer;
 }
