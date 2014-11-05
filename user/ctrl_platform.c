@@ -516,8 +516,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
 		os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
-		os_sprintf(stationConf.ssid, "%s", "WISPI.AP5a");
-		os_sprintf(stationConf.password, "%s", "kuracpalacpravijeznalac");
+		os_sprintf(stationConf.ssid, "%s", "MyWiFi");
+		os_sprintf(stationConf.password, "%s", "mysecretpass51");
 
 		wifi_station_set_config(&stationConf);
 	#endif
