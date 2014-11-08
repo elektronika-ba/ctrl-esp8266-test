@@ -214,7 +214,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_reconnect(struct espconn *pespconn)
     	uart0_sendStr("ctrl_platform_reconnect\r\n");
     #endif
 
-    ctrl_platform_check_ip(0);
+    ctrl_platform_check_ip(NULL);
 }
 
 static void ICACHE_FLASH_ATTR ctrl_platform_discon_cb(void *arg)
