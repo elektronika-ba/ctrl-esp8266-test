@@ -2,6 +2,7 @@
 .output/*
 user/.output/*
 driver/.output/*
+# user/wifi_debug_params.h
 
 # Windows image file caches
 Thumbs.db
