@@ -7,6 +7,8 @@
 // When defined, spits out various debugging messages on UART
 // and also doesn't use the WEB SERVER to setup the system but
 // uses defined values in code.
+// When defined, you also need to have wifi_debug_params.h file
+// with two string-defines: WIFI_SSID and WIFI_PASS.
 #define CTRL_DEBUG
 
 // When defined (also include "ctrl_database.h"!), the platform stores
@@ -17,13 +19,7 @@
 // transmission and re-transmitting it if something happens.
 //#define USE_DATABASE_APPROACH
 
-// User parameters sector addresses (from documentation, valid is 0~3). Each sector holds 4KB
-#define USER_PARAM_SEC_0				0
-#define USER_PARAM_SEC_1				1
-#define USER_PARAM_SEC_2				2
-#define USER_PARAM_SEC_3				3
-
-#define SETUP_OK_KEY					0xAA	// when settings exist in flash this is the valid-flag
+#define SETUP_OK_KEY					0xAA4529BA	// MAGIC VALUE. When settings exist in flash this is the valid-flag.
 
 #ifdef USE_DATABASE_APPROACH
 	#define TMR_ITEMS_SENDER_MS			300		// sending of all outgoing items when using the database approach
@@ -40,12 +36,19 @@ typedef enum {
 	CTRL_AUTHENTICATION_ERROR
 } tCtrlConnState;
 
+// WARNING: this structure's memory amount must be dividable by 4 in order to save to FLASH memory!!!
 typedef struct {
-	char setupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
+	unsigned long stationSetupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
 	char baseid[32];
 	char serverIp[4];
 	unsigned int serverPort;
+
+	char pad[2]; // added for the structure to be dividable by 4!
 } tCtrlSetup;
+
+typedef struct {
+	unsigned char(*message_received)(tCtrlMessage *);
+} tCtrlAppCallbacks;
 
 // private
 static void ctrl_platform_check_ip(void *);
