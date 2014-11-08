@@ -9,13 +9,7 @@ void user_init(void)
 {
 	uart_init(BIT_RATE_115200, BIT_RATE_115200);
 
-	#ifdef CTRL_DEBUG
-		uart0_sendStr("CTRL platform starting...\r\n");
-	#endif
-
+	uart0_sendStr("CTRL platform starting...\r\n");
 	ctrl_platform_init();
-
-	#ifdef CTRL_DEBUG
-		uart0_sendStr("CTRL platform started!\r\n");
-	#endif
+	uart0_sendStr("CTRL platform started!\r\n");
 }

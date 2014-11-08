@@ -3,9 +3,9 @@
 #include "user_interface.h"
 #include "mem.h"
 #include "espconn.h" // only for ESPCONN_OK enum
-#include "driver/uart.h"
 
 #include "ctrl_stack.h"
+#include "driver/uart.h"
 
 os_timer_t tmrDataExpecter;
 

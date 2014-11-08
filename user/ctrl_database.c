@@ -2,9 +2,9 @@
 #include "osapi.h"
 #include "user_interface.h"
 #include "mem.h"
-#include "driver/uart.h"
 
 #include "ctrl_database.h"
+#include "driver/uart.h"
 
 tNode *ctrlDatabase = NULL;
 unsigned long gTXbase = 1; // wee need this variable because we are not going to keep all sent+acknowledged messages in database like we do on Server implementation
