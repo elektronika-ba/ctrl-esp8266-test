@@ -10,6 +10,9 @@
 
 static struct espconn esp_conn;
 static esp_tcp esptcp;
+static unsigned char killConn;
+static const char *http404Header = "HTTP/1.0 404 Not Found\r\nServer: CTRL-Config-Server\r\nContent-Type: text/plain\r\n\r\nNot Found.\r\n";
+static const char *http200Header = "HTTP/1.0 200 OK\r\nServer: CTRL-Config-Server/0.1\r\nContent-Type: text/html\r\n";
 
 static void ICACHE_FLASH_ATTR ctrl_config_server_recon(void *arg, sint8 err)
 {
@@ -41,6 +44,7 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_recv(void *arg, char *data, uns
 {
 	struct espconn *ptrespconn = (struct espconn *)arg;
 
+	/*
 	uart0_sendStr("RECV: ");
 	unsigned short i;
 	for(i=0; i<len; i++)
@@ -50,286 +54,151 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_recv(void *arg, char *data, uns
 		uart0_sendStr(tmp2);
 	}
 	uart0_sendStr("\r\n");
+	*/
 
-/*
-    URL_Frame *pURL_Frame = NULL;
-    char *pParseBuffer = NULL;
-    bool parse_flag = false;
-    struct espconn *ptrespconn = arg;
-    parse_flag = save_data(pusrdata, length);
+	// working only with GET data
+	if( os_strncmp(data, "GET ", 4) == 0 ) {
+		uart0_sendStr("GET METHOD.\r\n");
 
-    do {
-        if (parse_flag == false) {
-        	response_send(ptrespconn, false);
-        	if (dat_sumlength == 0){
-        		if (precvbuffer != NULL){
-        			os_free(precvbuffer);
-        			precvbuffer = NULL;
-        		}
-        	}
-            break;
-        }
+		char page[16+1];
+		if( len<10 || ctrl_config_server_get_key_val("page", 16, data, page, '&') == 0 )
+		{
+			uart0_sendStr("Page param not provided!\r\n");
+			espconn_sent(ptrespconn, (uint8 *)http404Header, os_strlen(http404Header));
+			killConn = 1;
+			return;
+		}
 
-//        os_printf(precvbuffer);
-        pURL_Frame = (URL_Frame *)os_zalloc(sizeof(URL_Frame));
-        parse_url(precvbuffer, pURL_Frame);
-
-        switch (pURL_Frame->Type) {
-            case GET:
-                os_printf("We have a GET request.\n");
-
-                if (os_strcmp(pURL_Frame->pSelect, "client") == 0 &&
-                        os_strcmp(pURL_Frame->pCommand, "command") == 0) {
-                    if (os_strcmp(pURL_Frame->pFilename, "info") == 0) {
-                        json_send(ptrespconn, INFOMATION);
-                    }
-
-                    if (os_strcmp(pURL_Frame->pFilename, "status") == 0) {
-                        json_send(ptrespconn, CONNECT_STATUS);
-                    } else if (os_strcmp(pURL_Frame->pFilename, "scan") == 0) {
-                        char *strstr = NULL;
-                        strstr = (char *)os_strstr(pusrdata, "&");
-
-                        if (strstr == NULL) {
-                            if (pscaninfo == NULL) {
-                                pscaninfo = (scaninfo *)os_zalloc(sizeof(scaninfo));
-                            }
-
-                            pscaninfo->pespconn = ptrespconn;
-                            pscaninfo->pagenum = 0;
-                            pscaninfo->page_sn = 0;
-                            pscaninfo->data_cnt = 0;
-                            wifi_station_scan(NULL, json_scan_cb);
-                        } else {
-                            strstr ++;
-
-                            if (os_strncmp(strstr, "page", 4) == 0) {
-                                if (pscaninfo != NULL) {
-                                    pscaninfo->pagenum = *(strstr + 5);
-                                    pscaninfo->pagenum -= 0x30;
-
-                                    if (pscaninfo->pagenum > pscaninfo->totalpage || pscaninfo->pagenum == 0) {
-                                        response_send(ptrespconn, false);
-                                    } else {
-                                        json_send(ptrespconn, SCAN);
-                                    }
-                                } else {
-                                    response_send(ptrespconn, false);
-                                }
-                            } else {
-                                response_send(ptrespconn, false);
-                            }
-                        }
-                    } else {
-                        response_send(ptrespconn, false);
-                    }
-                } else if (os_strcmp(pURL_Frame->pSelect, "config") == 0 &&
-                           os_strcmp(pURL_Frame->pCommand, "command") == 0) {
-                    if (os_strcmp(pURL_Frame->pFilename, "wifi") == 0) {
-                        ap_conf = (struct softap_config *)os_zalloc(sizeof(struct softap_config));
-                        sta_conf = (struct station_config *)os_zalloc(sizeof(struct station_config));
-                        json_send(ptrespconn, WIFI);
-                        os_free(sta_conf);
-                        os_free(ap_conf);
-                        sta_conf = NULL;
-                        ap_conf = NULL;
-                    }
-
-#if PLUG_DEVICE
-                    else if (os_strcmp(pURL_Frame->pFilename, "switch") == 0) {
-                        json_send(ptrespconn, SWITCH_STATUS);
-                    }
-
-#endif
-
-#if LIGHT_DEVICE
-                    else if (os_strcmp(pURL_Frame->pFilename, "light") == 0) {
-                        json_send(ptrespconn, LIGHT_STATUS);
-                    }
-
-#endif
-
-                    else if (os_strcmp(pURL_Frame->pFilename, "reboot") == 0) {
-                        json_send(ptrespconn, REBOOT);
-                    } else {
-                        response_send(ptrespconn, false);
-                    }
-                } else {
-                    response_send(ptrespconn, false);
-                }
-
-                break;
-
-            case POST:
-                os_printf("We have a POST request.\n");
-                pParseBuffer = (char *)os_strstr(precvbuffer, "\r\n\r\n");
-
-                if (pParseBuffer == NULL) {
-                    break;
-                }
-
-                pParseBuffer += 4;
-
-                if (os_strcmp(pURL_Frame->pSelect, "config") == 0 &&
-                        os_strcmp(pURL_Frame->pCommand, "command") == 0) {
-#if SENSOR_DEVICE
-
-                    if (os_strcmp(pURL_Frame->pFilename, "sleep") == 0) {
-#else
-
-                    if (os_strcmp(pURL_Frame->pFilename, "reboot") == 0) {
-#endif
-
-                        if (pParseBuffer != NULL) {
-                            if (restart_10ms != NULL) {
-                                os_timer_disarm(restart_10ms);
-                            }
-
-                            if (rstparm == NULL) {
-                                rstparm = (rst_parm *)os_zalloc(sizeof(rst_parm));
-                            }
-
-                            rstparm->pespconn = ptrespconn;
-#if SENSOR_DEVICE
-                            rstparm->parmtype = DEEP_SLEEP;
-#else
-                            rstparm->parmtype = REBOOT;
-#endif
-
-                            if (restart_10ms == NULL) {
-                                restart_10ms = (os_timer_t *)os_malloc(sizeof(os_timer_t));
-                            }
-
-                            os_timer_setfn(restart_10ms, (os_timer_func_t *)restart_10ms_cb, NULL);
-                            os_timer_arm(restart_10ms, 10, 0);  // delay 10ms, then do
-
-                            response_send(ptrespconn, true);
-                        } else {
-                            response_send(ptrespconn, false);
-                        }
-                    } else if (os_strcmp(pURL_Frame->pFilename, "wifi") == 0) {
-                        if (pParseBuffer != NULL) {
-                            struct jsontree_context js;
-                            user_esp_platform_set_connect_status(DEVICE_CONNECTING);
-
-                            if (restart_10ms != NULL) {
-                                os_timer_disarm(restart_10ms);
-                            }
-
-                            if (ap_conf == NULL) {
-                                ap_conf = (struct softap_config *)os_zalloc(sizeof(struct softap_config));
-                            }
-
-                            if (sta_conf == NULL) {
-                                sta_conf = (struct station_config *)os_zalloc(sizeof(struct station_config));
-                            }
-
-                            jsontree_setup(&js, (struct jsontree_value *)&wifi_req_tree, json_putchar);
-                            json_parse(&js, pParseBuffer);
-
-                            if (rstparm == NULL) {
-                                rstparm = (rst_parm *)os_zalloc(sizeof(rst_parm));
-                            }
-
-                            rstparm->pespconn = ptrespconn;
-                            rstparm->parmtype = WIFI;
-
-                            if (sta_conf->ssid[0] != 0x00 || ap_conf->ssid[0] != 0x00) {
-                                ap_conf->ssid_hidden = 0;
-                                ap_conf->max_connection = 4;
-
-                                if (restart_10ms == NULL) {
-                                    restart_10ms = (os_timer_t *)os_malloc(sizeof(os_timer_t));
-                                }
-
-                                os_timer_disarm(restart_10ms);
-                                os_timer_setfn(restart_10ms, (os_timer_func_t *)restart_10ms_cb, NULL);
-                                os_timer_arm(restart_10ms, 10, 0);  // delay 10ms, then do
-                            } else {
-                                os_free(ap_conf);
-                                os_free(sta_conf);
-                                os_free(rstparm);
-                                sta_conf = NULL;
-                                ap_conf = NULL;
-                                rstparm =NULL;
-                            }
-
-                            response_send(ptrespconn, true);
-                        } else {
-                            response_send(ptrespconn, false);
-                        }
-                    }
-
-#if PLUG_DEVICE
-                    else if (os_strcmp(pURL_Frame->pFilename, "switch") == 0) {
-                        if (pParseBuffer != NULL) {
-                            struct jsontree_context js;
-                            jsontree_setup(&js, (struct jsontree_value *)&StatusTree, json_putchar);
-                            json_parse(&js, pParseBuffer);
-                            response_send(ptrespconn, true);
-                        } else {
-                            response_send(ptrespconn, false);
-                        }
-                    }
-
-#endif
-
-#if LIGHT_DEVICE
-                    else if (os_strcmp(pURL_Frame->pFilename, "light") == 0) {
-                        if (pParseBuffer != NULL) {
-                            struct jsontree_context js;
-
-                            jsontree_setup(&js, (struct jsontree_value *)&PwmTree, json_putchar);
-                            json_parse(&js, pParseBuffer);
-                            response_send(ptrespconn, true);
-                        } else {
-                            response_send(ptrespconn, false);
-                        }
-                    }
-
-#endif
-                    else {
-                        response_send(ptrespconn, false);
-                    }
-                } else {
-                    response_send(ptrespconn, false);
-                }
-
-//	            os_free(pParseBuffer);
-                break;
-        }
-
-        if (precvbuffer != NULL){
-        	os_free(precvbuffer);
-        	precvbuffer = NULL;
-        }
-        os_free(pURL_Frame);
-        pURL_Frame = NULL;
-
-    } while (0);
-*/
+		ctrl_config_server_process_page(ptrespconn, page);
+		return;
+	}
+	else
+	{
+		uart0_sendStr("Error, only GET method implemented!\r\n");
+		espconn_sent(ptrespconn, (uint8 *)http404Header, os_strlen(http404Header));
+		killConn = 1;
+		return;
+	}
 }
 
-static void ICACHE_FLASH_ATTR ctrl_config_server_listen(void *arg)
+static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *ptrespconn, char *page)
+{
+	espconn_sent(ptrespconn, (uint8 *)http200Header, os_strlen(http200Header));
+	espconn_sent(ptrespconn, (uint8 *)"\r\n", 2);
+
+	char mure[100];
+	os_sprintf(mure, "You requested Page <strong>%s</strong>\r\n", page);
+	espconn_sent(ptrespconn, mure, os_strlen(mure));
+
+	killConn = 1;
+}
+
+// search for a string of the form key=value in
+// a string that looks like q?xyz=abc&uvw=defgh HTTP/1.1\r\n
+//
+// The returned value is stored in retval. You must allocate
+// enough storage for retval, maxlen is the size of retval.
+//
+// It can also work like this: p=param1=value1$param2=value2$param3=value3 ... if ampchar='$' instead of '&' :)
+// 																	 ("page", os_strlen(page), data, page, '&')
+// Return LENGTH of found value of seeked parameter. this can return 0 if parameter was there but the value was missing!
+static unsigned char ICACHE_FLASH_ATTR ctrl_config_server_get_key_val(char *key, unsigned char maxlen, char *str, char *retval, char ampchar)
+{
+	unsigned char found = 0;
+	char *keyptr = key;
+	char prev_char = '\0';
+	*retval = '\0';
+
+	while( *str && *str!='\r' && *str!='\n' && !found )
+	{
+		// GET /whatever?page=wifi&action=search HTTP/1.1\r\n
+		if(*str == *keyptr)
+		{
+			// At the beginning of the key we must check if this is the start of the key otherwise we will
+			// match on 'foobar' when only looking for 'bar', by andras tucsni, modified by trax
+			if(keyptr == key && !( prev_char == '?' || prev_char == ampchar ) ) // trax: accessing (str-1) can be a problem if the incoming string starts with the key itself!
+			{
+				str++;
+				continue;
+			}
+
+			keyptr++;
+
+			if (*keyptr == '\0')
+			{
+				str++;
+				keyptr = key;
+				if (*str == '=')
+				{
+					found = 1;
+				}
+			}
+		}
+		else
+		{
+			keyptr = key;
+		}
+		prev_char = *str;
+		str++;
+	}
+
+	if(found == 1)
+	{
+		found = 0;
+
+		// copy the value to a buffer and terminate it with '\0'
+		while( *str && *str!='\r' && *str!='\n' && *str!=' ' && *str!=ampchar && maxlen>0 )
+		{
+			*retval = *str;
+			maxlen--;
+			str++;
+			retval++;
+			found++;
+		}
+		*retval = '\0';
+	}
+
+	return found;
+}
+
+static void ICACHE_FLASH_ATTR ctrl_config_server_sent(void *arg)
 {
     struct espconn *pesp_conn = (struct espconn *)arg;
 
-	uart0_sendStr("ctrl_config_server_listen\r\n");
+	if (pesp_conn == NULL)
+	{
+		return;
+	}
+
+	if(killConn)
+	{
+		espconn_disconnect(pesp_conn);
+	}
+}
+
+static void ICACHE_FLASH_ATTR ctrl_config_server_connect(void *arg)
+{
+    struct espconn *pesp_conn = (struct espconn *)arg;
+
+	uart0_sendStr("ctrl_config_server_connect\r\n");
 
     espconn_regist_recvcb(pesp_conn, ctrl_config_server_recv);
     espconn_regist_reconcb(pesp_conn, ctrl_config_server_recon);
     espconn_regist_disconcb(pesp_conn, ctrl_config_server_discon);
+    espconn_regist_sentcb(pesp_conn, ctrl_config_server_sent);
 }
 
 // all socket data which is received is flushed into this function
 void ICACHE_FLASH_ATTR ctrl_config_server_init()
 {
+	uart0_sendStr("ctrl_config_server_init()\r\n");
+
     esptcp.local_port = 80;
 
     esp_conn.type = ESPCONN_TCP;
     esp_conn.state = ESPCONN_NONE;
     esp_conn.proto.tcp = &esptcp;
-    espconn_regist_connectcb(&esp_conn, ctrl_config_server_listen);
+    espconn_regist_connectcb(&esp_conn, ctrl_config_server_connect);
 
     espconn_accept(&esp_conn);
 }

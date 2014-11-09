@@ -9,7 +9,7 @@
 // uses defined values in code.
 // When defined, you also need to have wifi_debug_params.h file
 // with two string-defines: WIFI_SSID and WIFI_PASS.
-#define CTRL_DEBUG
+//#define CTRL_DEBUG
 
 // When defined (also include "ctrl_database.h"!), the platform stores
 // outgoing messages in database before sending them to CTRL Server.
@@ -17,7 +17,7 @@
 // delivered to Server because they WILL BE.
 // When not defined, you need to handle acknowledging current
 // transmission and re-transmitting it if something happens.
-//#define USE_DATABASE_APPROACH
+#define USE_DATABASE_APPROACH
 
 #define SETUP_OK_KEY					0xAA4529BA	// MAGIC VALUE. When settings exist in flash this is the valid-flag.
 

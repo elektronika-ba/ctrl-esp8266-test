@@ -135,18 +135,30 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recon_cb(void *arg, sint8 err)
     if (++tcpReconCount >= 5)
     {
         connState = CTRL_TCP_CONNECTING_ERROR;
+        tcpReconCount = 0;
+
+		os_timer_disarm(&tmrStatusLedBlinker);
+		os_timer_arm(&tmrStatusLedBlinker, 1000, 1);
+
         #ifdef CTRL_DEBUG
-        	uart0_sendStr("ctrl_platform_recon_cb 5 failed TCP attempts\r\n");
+        	uart0_sendStr("ctrl_platform_recon_cb, 5 failed TCP attempts!\n");
+        	uart0_sendStr("Will reconnect in 10s...\r\n");
         #endif
+
+		os_timer_disarm(&tmrLinker);
+		os_timer_setfn(&tmrLinker, (os_timer_func_t *)ctrl_platform_reconnect, pespconn);
+		os_timer_arm(&tmrLinker, 10000, 0);
     }
+    else
+    {
+		#ifdef CTRL_DEBUG
+			uart0_sendStr("Will reconnect in 1s...\r\n");
+		#endif
 
-	#ifdef CTRL_DEBUG
-		uart0_sendStr("Will reconnect in 1s...\r\n");
-	#endif
-
-    os_timer_disarm(&tmrLinker);
-    os_timer_setfn(&tmrLinker, (os_timer_func_t *)ctrl_platform_reconnect, pespconn);
-    os_timer_arm(&tmrLinker, 1000, 0);
+		os_timer_disarm(&tmrLinker);
+		os_timer_setfn(&tmrLinker, (os_timer_func_t *)ctrl_platform_reconnect, pespconn);
+		os_timer_arm(&tmrLinker, 1000, 0);
+	}
 }
 
 static void ICACHE_FLASH_ATTR ctrl_platform_sent_cb(void *arg)
@@ -607,7 +619,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 			#ifdef CTRL_DEBUG
 				uart0_sendStr("Restarting in SOFTAP mode...\r\n");
 			#endif
-			wifi_station_disconnect();
+			//wifi_station_disconnect();
 			wifi_set_opmode(SOFTAP_MODE);
 			system_restart();
 		}
@@ -621,12 +633,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_memset(apConfig.password, 0, sizeof(apConfig.password));
 		os_sprintf(apConfig.password, "%02x%02x%02x%02x%02x%02x", MAC2STR(macaddr));
 		apConfig.authmode = AUTH_WPA_PSK;
-		unsigned char chan = (unsigned char)rand() % 13;
-		if(chan < 1 || chan > 13)
-		{
-			chan = 7;
-		}
-		apConfig.channel = chan;
+		apConfig.channel = 7;
 		apConfig.max_connection = 255; // 1?
 		apConfig.ssid_hidden = 0;
 
