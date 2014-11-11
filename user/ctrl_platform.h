@@ -9,7 +9,7 @@
 // uses defined values in code.
 // When defined, you also need to have wifi_debug_params.h file
 // with two string-defines: WIFI_SSID and WIFI_PASS.
-//#define CTRL_DEBUG
+#define CTRL_DEBUG
 
 // When defined (also include "ctrl_database.h"!), the platform stores
 // outgoing messages in database before sending them to CTRL Server.

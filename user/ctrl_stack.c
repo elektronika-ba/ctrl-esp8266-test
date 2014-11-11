@@ -235,6 +235,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			// has remaining data in buffer (beginning of another message but not entire message)
 			if(rxBuffLen-processedLen > 0)
 			{
+				os_timer_disarm(&tmrDataExpecter);
 				os_timer_arm(&tmrDataExpecter, TMR_DATA_EXPECTER_MS, 0); // 0 = do not repeat automatically
 
 				char *newRxBuff = (char *)os_malloc(rxBuffLen-processedLen);
