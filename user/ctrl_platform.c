@@ -604,23 +604,28 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		wifi_station_set_config(&stationConf);
 	#endif
 
+// debugging, to always enter config server mode
+//ctrlSetup.stationSetupOk = 0;
+//--
+
 	// Must enter into Configuration mode?
 	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY || wifi_get_opmode() != STATION_MODE)
 	{
 		#ifdef CTRL_DEBUG
-			uart0_sendStr("I am not in STATION mode, restarting in STATION mode...\r\n");
 			wifi_set_opmode(STATION_MODE);
+
+			uart0_sendStr("I am not in STATION mode, restarting in STATION mode...\r\n");
 			system_restart();
 		#endif
 
-		// make sure we are in SOFTAP_MODE for configuration server to work
-		if(wifi_get_opmode() != SOFTAP_MODE)
+		// make sure we are in STATIONAP_MODE for configuration server to work
+		if(wifi_get_opmode() != STATIONAP_MODE)
 		{
-			#ifdef CTRL_DEBUG
-				uart0_sendStr("Restarting in SOFTAP mode...\r\n");
-			#endif
 			//wifi_station_disconnect();
-			wifi_set_opmode(SOFTAP_MODE);
+			wifi_set_opmode(STATIONAP_MODE);
+			#ifdef CTRL_DEBUG
+				uart0_sendStr("Restarting in STATIONAP mode...\r\n");
+			#endif
 			system_restart();
 		}
 
@@ -679,7 +684,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 			#ifdef CTRL_DEBUG
 				uart0_sendStr("Restarting in STATION mode...\r\n");
 			#endif
-			wifi_station_disconnect();
+			//wifi_station_disconnect();
 			wifi_set_opmode(STATION_MODE);
 			system_restart();
 		}

@@ -9,7 +9,7 @@
 // uses defined values in code.
 // When defined, you also need to have wifi_debug_params.h file
 // with two string-defines: WIFI_SSID and WIFI_PASS.
-#define CTRL_DEBUG
+//#define CTRL_DEBUG
 
 // When defined (also include "ctrl_database.h"!), the platform stores
 // outgoing messages in database before sending them to CTRL Server.
@@ -39,7 +39,7 @@ typedef enum {
 // WARNING: this structure's memory amount must be dividable by 4 in order to save to FLASH memory!!!
 typedef struct {
 	unsigned long stationSetupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
-	char baseid[16]; // was 32...
+	char baseid[16];
 	char serverIp[4];
 	unsigned int serverPort;
 
