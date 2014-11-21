@@ -7,12 +7,24 @@
 
 #include "ctrl_config_server.h"
 #include "flash_param.h"
+#include "ctrl_platform.h"
 
 static struct espconn esp_conn;
 static esp_tcp esptcp;
 static unsigned char killConn;
-static const char *http404Header = "HTTP/1.0 404 Not Found\r\nServer: CTRL-Config-Server\r\nContent-Type: text/plain\r\n\r\nNot Found.\r\n";
+static unsigned char returnToNormalMode;
+// http headers
+static const char *http404Header = "HTTP/1.0 404 Not Found\r\nServer: CTRL-Config-Server\r\nContent-Type: text/plain\r\n\r\nNot Found (or method not implemented).\r\n";
 static const char *http200Header = "HTTP/1.0 200 OK\r\nServer: CTRL-Config-Server/0.1\r\nContent-Type: text/html\r\n";
+// html page header and footer
+static const char *pageStart = "<html><head><title>CTRL Base Config</title></head><body>\r\n";
+static const char *pageEnd = "<br><br><hr><a href=\"http://my.ctrl.ba\" target=\"_blank\"><i>MY.CTRL.BA</i></a></body></html>";
+// html pages (NOTE: make sure you don't have the '{' without the closing '}' !
+static const char *pageIndex = "<h1>Welcome to CTRL Base Config</h1><ul><li><a href=\"?page=wifi\">WIFI Settings</a></li><li><a href=\"?page=ctrl\">CTRL Settings</a></li><li><a href=\"?page=return\">Return Normal Mode</a></li></ul>\r\n";
+static const char *pageSetWifi = "<h1><a href=\"/\">Home</a> / WIFI Settings</h1><form method=\"get\" action=\"?page=wifi&save=1\"><b>SSID:</b> <input type=\"text\" name=\"ssid\" value=\"{ssid}\"><br><b>Password:</b> <input type=\"text\" name=\"pass\" value=\"{pass}\"><br><br><input type=\"submit\" value=\"Save\"></form>\r\n";
+static const char *pageSetCtrl = "<h1><a href=\"/\">Home</a> / CTRL Settings</h1><form method=\"get\" action=\"?page=ctrl&save=1\"><b>BaseID:</b> <input type=\"text\" name=\"baseid\" value=\"{baseid}\"> (get from <a href=\"http://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)<br><b>Server IP:</b> <input type=\"text\" name=\"ip\" value=\"{ip}\"> (78.47.48.138)<br><b>Port:</b> <input type=\"text\" name=\"port\" value=\"{port}\"> (8000)<br><br><input type=\"submit\" value=\"Save\"></form>\r\n";
+static const char *pageResetStarted = "<h1>Returning to Normal Mode...</h1>You can close this window now.\r\n";
+static const char *pageSavedInfo = "<br><b style=\"color: green\">Settings Saved!</b>\r\n";
 
 static void ICACHE_FLASH_ATTR ctrl_config_server_recon(void *arg, sint8 err)
 {
@@ -57,19 +69,14 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_recv(void *arg, char *data, uns
 	*/
 
 	// working only with GET data
-	if( os_strncmp(data, "GET ", 4) == 0 ) {
+	if( os_strncmp(data, "GET ", 4) == 0 )
+	{
 		uart0_sendStr("GET METHOD.\r\n");
 
-		char page[16+1];
-		if( len<10 || ctrl_config_server_get_key_val("page", 16, data, page, '&') == 0 )
-		{
-			uart0_sendStr("Page param not provided!\r\n");
-			espconn_sent(ptrespconn, (uint8 *)http404Header, os_strlen(http404Header));
-			killConn = 1;
-			return;
-		}
-
-		ctrl_config_server_process_page(ptrespconn, page);
+		char page[16];
+		os_memset(page, 0, sizeof(page));
+		ctrl_config_server_get_key_val("page", 15, data, page);
+		ctrl_config_server_process_page(ptrespconn, page, data);
 		return;
 	}
 	else
@@ -81,15 +88,196 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_recv(void *arg, char *data, uns
 	}
 }
 
-static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *ptrespconn, char *page)
+static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *ptrespconn, char *page, char *request)
 {
 	espconn_sent(ptrespconn, (uint8 *)http200Header, os_strlen(http200Header));
 	espconn_sent(ptrespconn, (uint8 *)"\r\n", 2);
 
-	char mure[100];
-	os_sprintf(mure, "You requested Page <strong>%s</strong>\r\n", page);
-	espconn_sent(ptrespconn, mure, os_strlen(mure));
+	// page header
+	espconn_sent(ptrespconn, (uint8 *)pageStart, os_strlen(pageStart));
 
+	// arriving data for saving?
+	char save[2] = {'0', '\0'};
+	ctrl_config_server_get_key_val("save", 1, request, save);
+
+	// wifi settings page
+	if( os_strncmp(page, "wifi", 4) == 0 )
+	{
+		struct station_config stationConf;
+
+		// saving data?
+		if( save[0] == '1' )
+		{
+			os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
+			os_memset(stationConf.password, 0, sizeof(stationConf.password));
+
+			// copy parameters from URL GET to actual destination in structure
+			ctrl_config_server_get_key_val("ssid", sizeof(stationConf.ssid), request, stationConf.ssid);
+			ctrl_config_server_get_key_val("pass", sizeof(stationConf.password), request, stationConf.password);
+
+			wifi_station_set_config(&stationConf);
+		}
+		wifi_station_get_config(&stationConf);
+
+		// send page back to the browser, byte by byte because we will do templating here
+		char *stream = (char *)pageSetWifi;
+		char templateKey[16]; // 16 should be enough for: "{these_keys}"
+		os_memset(templateKey, 0, sizeof(templateKey));
+		unsigned char templateKeyIdx = 0;
+		while(stream)
+		{
+			char tosend = *stream;
+
+			// start of template key
+			if(tosend == '{')
+			{
+				// fetch the key
+				while(*(stream++) != '}')
+				{
+					templateKey[templateKeyIdx++] = *stream;
+				}
+				// we have the key and we are at the '}' char in stream
+
+				// send the replacing value now
+				if( os_strncmp(templateKey, "ssid", 4) == 0 )
+				{
+					espconn_sent(ptrespconn, (uint8 *)stationConf.ssid, os_strlen(stationConf.ssid));
+				}
+				else if( os_strncmp(templateKey, "pass", 4) == 0 )
+				{
+					espconn_sent(ptrespconn, (uint8 *)stationConf.password, os_strlen(stationConf.password));
+				}
+			}
+			else
+			{
+				espconn_sent(ptrespconn, (uint8 *)&tosend, 1);
+			}
+
+			stream++;
+		}
+
+		// was saving?
+		if( save[0] == '1' )
+		{
+			espconn_sent(ptrespconn, (uint8 *)pageSavedInfo, os_strlen(pageSavedInfo));
+		}
+	}
+	// ctrl settings page
+	else if( os_strncmp(page, "ctrl", 4) == 0 )
+	{
+		tCtrlSetup ctrlSetup;
+
+		// saving data?
+		if( save[0] == '1' )
+		{
+			ctrlSetup.stationSetupOk = SETUP_OK_KEY; // say that there is *some* setup in flash... hopefully it is OK as we don't validate it
+
+			// baseid
+			char baseid[33];
+			char *baseidptr = baseid;
+			ctrl_config_server_get_key_val("baseid", 32, request, baseid);
+			unsigned char i = 0;
+			while(i < 16)
+			{
+				char one[3] = {'0', '0', '\0'};
+				one[0] = *baseidptr;
+				baseidptr++;
+				one[1] = *baseidptr;
+				baseidptr++;
+				ctrlSetup.baseid[i++] = strtol(one, NULL, 16);
+			}
+
+			// server ip
+			char serverIp[16];
+			ctrl_config_server_get_key_val("ip", 32, request, serverIp);
+			uint32 iServerIp = ipaddr_addr(serverIp);
+			char *ipParts = (char *)&iServerIp;
+			ctrlSetup.serverIp[0] = ipParts[0];
+			ctrlSetup.serverIp[1] = ipParts[1];
+			ctrlSetup.serverIp[2] = ipParts[2];
+			ctrlSetup.serverIp[3] = ipParts[3];
+
+			// server port
+			char serverPort[6];
+			ctrl_config_server_get_key_val("port", 5, request, serverPort);
+			ctrlSetup.serverPort = atoi(serverPort);
+
+			save_flash_param(ESP_PARAM_SAVE_1, (uint32 *)&ctrlSetup, sizeof(tCtrlSetup));
+		}
+
+		load_flash_param(ESP_PARAM_SAVE_1, (uint32 *)&ctrlSetup, sizeof(tCtrlSetup));
+
+		// send page back to the browser, byte by byte because we will do templating here
+		char *stream = (char *)pageSetCtrl;
+		char templateKey[16]; // 16 should be enough for: "{these_keys}"
+		os_memset(templateKey, 0, sizeof(templateKey));
+		unsigned char templateKeyIdx = 0;
+		while(stream)
+		{
+			char tosend = *stream;
+
+			// start of template key
+			if(tosend == '{')
+			{
+				// fetch the key
+				while(*(stream++) != '}')
+				{
+					templateKey[templateKeyIdx++] = *stream;
+				}
+				// we have the key and we are at the '}' char in stream
+
+				// send the replacing value now
+				if( os_strncmp(templateKey, "baseid", 6) == 0 )
+				{
+					char baseid[3];
+					char i;
+					for(i=0; i<16; i++)
+					{
+						os_sprintf(baseid, "%02X", ctrlSetup.baseid[i]);
+						espconn_sent(ptrespconn, (uint8 *)baseid, os_strlen(baseid));
+					}
+				}
+				else if( os_strncmp(templateKey, "ip", 8) == 0 )
+				{
+					char serverIp[16];
+					os_sprintf(serverIp, "%u.%u.%u.%u", ctrlSetup.serverIp[0], ctrlSetup.serverIp[1], ctrlSetup.serverIp[2], ctrlSetup.serverIp[3]);
+					espconn_sent(ptrespconn, (uint8 *)serverIp, os_strlen(serverIp));
+				}
+				else if( os_strncmp(templateKey, "port", 4) == 0 )
+				{
+					char serverPort[6];
+					os_sprintf(serverPort, "%u", ctrlSetup.serverPort);
+					espconn_sent(ptrespconn, (uint8 *)serverPort, os_strlen(serverPort));
+				}
+			}
+			else
+			{
+				espconn_sent(ptrespconn, (uint8 *)&tosend, 1);
+			}
+
+			stream++;
+		}
+
+		// was saving?
+		if( save[0] == '1' )
+		{
+			espconn_sent(ptrespconn, (uint8 *)pageSavedInfo, os_strlen(pageSavedInfo));
+		}
+	}
+	// reset and return to normal mode of the Base station
+	else if( os_strncmp(page, "return", 3) == 0 )
+	{
+		espconn_sent(ptrespconn, (uint8 *)pageResetStarted, os_strlen(pageResetStarted));
+		returnToNormalMode = 1; // after killing the connection, we will restart and return to normal mode.
+	}
+	// start page (= 404 page, for simplicity)
+	else
+	{
+		espconn_sent(ptrespconn, (uint8 *)pageIndex, os_strlen(pageIndex));
+	}
+
+	// page footer
+	espconn_sent(ptrespconn, (uint8 *)pageEnd, os_strlen(pageEnd));
 	killConn = 1;
 }
 
@@ -99,10 +287,8 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 // The returned value is stored in retval. You must allocate
 // enough storage for retval, maxlen is the size of retval.
 //
-// It can also work like this: p=param1=value1$param2=value2$param3=value3 ... if ampchar='$' instead of '&' :)
-// 																	 ("page", os_strlen(page), data, page, '&')
 // Return LENGTH of found value of seeked parameter. this can return 0 if parameter was there but the value was missing!
-static unsigned char ICACHE_FLASH_ATTR ctrl_config_server_get_key_val(char *key, unsigned char maxlen, char *str, char *retval, char ampchar)
+static unsigned char ICACHE_FLASH_ATTR ctrl_config_server_get_key_val(char *key, unsigned char maxlen, char *str, char *retval)
 {
 	unsigned char found = 0;
 	char *keyptr = key;
@@ -116,7 +302,7 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_config_server_get_key_val(char *key,
 		{
 			// At the beginning of the key we must check if this is the start of the key otherwise we will
 			// match on 'foobar' when only looking for 'bar', by andras tucsni, modified by trax
-			if(keyptr == key && !( prev_char == '?' || prev_char == ampchar ) ) // trax: accessing (str-1) can be a problem if the incoming string starts with the key itself!
+			if(keyptr == key && !( prev_char == '?' || prev_char == '&' ) ) // trax: accessing (str-1) can be a problem if the incoming string starts with the key itself!
 			{
 				str++;
 				continue;
@@ -147,7 +333,7 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_config_server_get_key_val(char *key,
 		found = 0;
 
 		// copy the value to a buffer and terminate it with '\0'
-		while( *str && *str!='\r' && *str!='\n' && *str!=' ' && *str!=ampchar && maxlen>0 )
+		while( *str && *str!='\r' && *str!='\n' && *str!=' ' && *str!='&' && maxlen>0 )
 		{
 			*retval = *str;
 			maxlen--;
@@ -173,6 +359,12 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_sent(void *arg)
 	if(killConn)
 	{
 		espconn_disconnect(pesp_conn);
+
+		if(returnToNormalMode)
+		{
+			wifi_set_opmode(STATION_MODE);
+			system_restart();
+		}
 	}
 }
 

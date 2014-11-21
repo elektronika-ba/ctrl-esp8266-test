@@ -4,8 +4,8 @@
 #include "c_types.h"
 
 // private
-static void ctrl_config_server_process_page(struct espconn *, char *);
-static unsigned char ctrl_config_server_get_key_val(char *, unsigned char, char *, char *, char);
+static void ctrl_config_server_process_page(struct espconn *, char *, char *);
+static unsigned char ctrl_config_server_get_key_val(char *, unsigned char, char *, char *);
 static void ctrl_config_server_sent(void *);
 static void ctrl_config_server_recon(void *, sint8);
 static void ctrl_config_server_discon(void *);

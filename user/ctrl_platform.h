@@ -39,7 +39,7 @@ typedef enum {
 // WARNING: this structure's memory amount must be dividable by 4 in order to save to FLASH memory!!!
 typedef struct {
 	unsigned long stationSetupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
-	char baseid[32];
+	char baseid[16]; // was 32...
 	char serverIp[4];
 	unsigned int serverPort;
 
