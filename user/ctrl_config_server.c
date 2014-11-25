@@ -18,14 +18,14 @@ static unsigned char returnToNormalMode;
 static const char *http404Header = "HTTP/1.0 404 Not Found\r\nServer: CTRL-Config-Server\r\nContent-Type: text/plain\r\n\r\nNot Found (or method not implemented).\r\n";
 static const char *http200Header = "HTTP/1.0 200 OK\r\nServer: CTRL-Config-Server/0.1\r\nContent-Type: text/html\r\n";
 // html page header and footer
-static const char *pageStart = "<html><head><title>CTRL Base Config</title><link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css\"></head><body><form method=\"get\" action=\"/\"><input type=\"hidden\" name=\"save\" value=\"1\">\r\n";
-static const char *pageEnd = "</form><br><hr><a href=\"http://my.ctrl.ba\" target=\"_blank\"><i>MY.CTRL.BA</i></a>\r\n<script src=\"https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js\"></script>\r\n</body></html>\r\n";
+static const char *pageStart = "<html><head><title>CTRL Base Config</title><style>body{font-family: Arial}</style></head><body><form method=\"get\" action=\"/\"><input type=\"hidden\" name=\"save\" value=\"1\">\r\n";
+static const char *pageEnd = "</form><hr><a href=\"https://my.ctrl.ba\" target=\"_blank\"><i>my.ctrl.ba</i></a>\r\n</body></html>\r\n";
 // html pages (NOTE: make sure you don't have the '{' without the closing '}' !
-static const char *pageIndex = "<h1>Welcome to CTRL Base Config</h1><ul><li><a href=\"?page=wifi\">WIFI Settings</a></li><li><a href=\"?page=ctrl\">CTRL Settings</a></li><li><a href=\"?page=return\">Return Normal Mode</a></li></ul>\r\n";
-static const char *pageSetWifi = "<h1><a href=\"/\">Home</a> / WIFI Settings</h1><input type=\"hidden\" name=\"page\" value=\"wifi\"><b>SSID:</b> <input type=\"text\" name=\"ssid\" value=\"{ssid}\"><br><b>Password:</b> <input type=\"text\" name=\"pass\" value=\"{pass}\"><br><b>Status:</b> <a href=\"?page=wifi\"><u>{status}</u></a><br><br><input type=\"submit\" value=\"Save\">\r\n";
-static const char *pageSetCtrl = "<h1><a href=\"/\">Home</a> / CTRL Settings</h1><input type=\"hidden\" name=\"page\" value=\"ctrl\"><b>BaseID:</b> <input type=\"text\" name=\"baseid\" value=\"{baseid}\"> (get from <a href=\"http://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)<br><b>Server IP:</b> <input type=\"text\" name=\"ip\" value=\"{ip}\"> (78.47.48.138)<br><b>Port:</b> <input type=\"text\" name=\"port\" value=\"{port}\"> (8000)<br><br><input type=\"submit\" value=\"Save\">\r\n";
+static const char *pageIndex = "<h2>Welcome to CTRL Base Config</h2><ul><li><a href=\"?page=wifi\">WIFI Settings</a></li><li><a href=\"?page=ctrl\">CTRL Settings</a></li><li><a href=\"?page=return\">Return Normal Mode</a></li></ul>\r\n";
+static const char *pageSetWifi = "<h2><a href=\"/\">Home</a> / WIFI Settings</h2><input type=\"hidden\" name=\"page\" value=\"wifi\"><table border=\"0\"><tr><td><b>SSID:</b></td><td><input type=\"text\" name=\"ssid\" value=\"{ssid}\" size=\"40\"></td></tr><tr><td><b>Password:</b></td><td><input type=\"text\" name=\"pass\" value=\"{pass}\" size=\"40\"></td></tr><tr><td><b>Status:</b></td><td>{status} <a href=\"?page=wifi\">[refresh]</a></td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td></tr></table>\r\n";
+static const char *pageSetCtrl = "<h2><a href=\"/\">Home</a> / CTRL Settings</h2><input type=\"hidden\" name=\"page\" value=\"ctrl\"><table border=\"0\"><tr><td><b>Base ID:</b></td><td><input type=\"text\" name=\"baseid\" value=\"{baseid}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>AES-128 Key:</b></td><td><input type=\"text\" name=\"crypt\" value=\"{crypt}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>Server IP:</b></td><td><input type=\"text\" name=\"ip\" value=\"{ip}\" size=\"18\"></td><td>(78.47.48.138)</td></tr><tr><td><b>Port:</b></td><td><input type=\"text\" name=\"port\" value=\"{port}\" size=\"5\"></td><td>(8000)</td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td><td></td></tr></table>\r\n";
 static const char *pageResetStarted = "<h1>Returning to Normal Mode...</h1>You can close this window now.\r\n";
-static const char *pageSavedInfo = "<b style=\"color: green\">Settings Saved!</b>\r\n";
+static const char *pageSavedInfo = "<br><b style=\"color: green\">Settings Saved!</b>\r\n";
 
 static void ICACHE_FLASH_ATTR return_to_normal_mode_cb(void *arg)
 {
@@ -180,11 +180,11 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 					}
 					else if(x == STATION_CONNECT_FAIL)
 					{
-						os_sprintf(status, "Connect failed");
+						os_sprintf(status, "Connect Failed");
 					}
 					else
 					{
-						os_sprintf(status, "Not connected");
+						os_sprintf(status, "Not Connected");
 					}
 
 					espconn_sent(ptrespconn, (uint8 *)status, os_strlen(status));
@@ -227,6 +227,21 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 				one[1] = *baseidptr;
 				baseidptr++;
 				ctrlSetup.baseid[i++] = strtol(one, NULL, 16);
+			}
+
+			// aes 128 key
+			char aes128key[33];
+			char *aes128keyptr = aes128key;
+			ctrl_config_server_get_key_val("crypt", 32, request, aes128key);
+			unsigned char i = 0;
+			while(i < 16)
+			{
+				char one[3] = {'0', '0', '\0'};
+				one[0] = *aes128keyptr;
+				aes128keyptr++;
+				one[1] = *aes128keyptr;
+				aes128keyptr++;
+				ctrlSetup.aes128Key[i++] = strtol(one, NULL, 16);
 			}
 
 			// server ip
@@ -278,6 +293,16 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 					{
 						os_sprintf(baseid, "%02x", ctrlSetup.baseid[i]);
 						espconn_sent(ptrespconn, (uint8 *)baseid, os_strlen(baseid));
+					}
+				}
+				else if( os_strncmp(templateKey, "crypt", 5) == 0 )
+				{
+					char aes128key[3];
+					char i;
+					for(i=0; i<16; i++)
+					{
+						os_sprintf(aes128key, "%02x", ctrlSetup.aes128Key[i]);
+						espconn_sent(ptrespconn, (uint8 *)aes128key, os_strlen(aes128key));
 					}
 				}
 				else if( os_strncmp(templateKey, "ip", 2) == 0 )

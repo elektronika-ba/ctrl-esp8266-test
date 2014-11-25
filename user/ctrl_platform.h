@@ -40,6 +40,7 @@ typedef enum {
 typedef struct {
 	unsigned long stationSetupOk; // this holds the SETUP_OK_KEY value if settings are OK in flash memory
 	char baseid[16];
+	char aes128Key[16];
 	char serverIp[4];
 	unsigned int serverPort;
 

@@ -217,7 +217,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_connect_cb(void *arg)
 		TXbase = 1;
 	#endif
 
-	ctrl_stack_authorize(ctrlSetup.baseid, sync);
+	ctrl_stack_authorize(ctrlSetup.baseid, ctrlSetup.aes128Key, sync);
 }
 
 static void ICACHE_FLASH_ATTR ctrl_platform_reconnect(struct espconn *pespconn)
@@ -632,6 +632,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		char macaddr[6];
 		wifi_get_macaddr(SOFTAP_IF, macaddr);
 
+		// TODO: find a better way of setting this password so that anybody sniffing can't simply read it out
+		// One idea is to blink the numerical password on status LED? Not very user friendly...
 		struct softap_config apConfig;
 		os_memset(apConfig.ssid, 0, sizeof(apConfig.ssid));
 		os_sprintf(apConfig.ssid, "CTRL_%02x%02x%02x%02x%02x%02x", MAC2STR(macaddr));

@@ -42,7 +42,7 @@ void ctrl_stack_backoff(unsigned char);
 void ctrl_stack_keepalive(unsigned char);
 unsigned char ctrl_stack_send(char *, unsigned short, unsigned long, unsigned char);
 void ctrl_stack_recv(char *, unsigned short);
-void ctrl_stack_authorize(char *, unsigned char);
+void ctrl_stack_authorize(char *, char *, unsigned char);
 void ctrl_stack_init(tCtrlCallbacks *);
 
 #endif

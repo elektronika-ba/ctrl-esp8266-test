@@ -11,6 +11,7 @@ os_timer_t tmrDataExpecter;
 
 static unsigned long TXserver;
 static char *baseid;
+static char *aes128Key;
 static char *rxBuff = NULL;
 static unsigned short rxBuffLen;
 static unsigned char authMode;
@@ -357,9 +358,10 @@ void ICACHE_FLASH_ATTR ctrl_stack_keepalive(unsigned char keepalive)
 }
 
 // authorize connection and synchronize TXsender fields in both directions
-void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, unsigned char sync)
+void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, unsigned char sync)
 {
 	baseid = baseid_;
+	aes128Key = aes128Key_;
 
 	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
 
