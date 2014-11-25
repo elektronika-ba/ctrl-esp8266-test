@@ -324,20 +324,9 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 	// do something with msg now
 	#ifdef CTRL_DEBUG
 		char tmp[100];
-		os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u, Data:", msg->length, msg->header, msg->TXsender);
+		os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
 		uart0_sendStr(tmp);
 	#endif
-
-	/*
-	unsigned short i;
-	for(i=0; i<msg->length-1-4; i++)
-	{
-		char tmp2[10];
-		os_sprintf(tmp2, " 0x%X", msg->data[i]);
-		uart0_sendStr(tmp2);
-	}
-	uart0_sendStr(".\r\n");
-	*/
 
 	// after we finish, and if we find out that we don't have enough
 	// storage to process next message that will arive, we can simply
@@ -349,8 +338,8 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 	// push message to ctrl-user-application
 	if(ctrlAppCallbacks.message_received != NULL)
 	{
-		unsigned char ok = ctrlAppCallbacks.message_received(msg);
-		ctrl_stack_backoff(!ok);
+		unsigned char backoff = ctrlAppCallbacks.message_received(msg);
+		ctrl_stack_backoff(backoff);
 	}
 }
 
@@ -609,7 +598,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 //--
 
 	// Must enter into Configuration mode?
-	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY || wifi_get_opmode() != STATION_MODE)
+	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY /*|| wifi_get_opmode() != STATION_MODE*/)
 	{
 		#ifdef CTRL_DEBUG
 			wifi_set_opmode(STATION_MODE);

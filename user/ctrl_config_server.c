@@ -233,7 +233,7 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 			char aes128key[33];
 			char *aes128keyptr = aes128key;
 			ctrl_config_server_get_key_val("crypt", 32, request, aes128key);
-			unsigned char i = 0;
+			i = 0;
 			while(i < 16)
 			{
 				char one[3] = {'0', '0', '\0'};
