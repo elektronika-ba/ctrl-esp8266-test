@@ -19,10 +19,12 @@
 #define BTN_CONFIG_GPIO 	0			// Button to enter configuration mode of ESP8266
 #define LED_STATUS_GPIO		2			// Status LED that blinks according the the device's current WIFI and tcp-link status
 
+#define LED_FLASH_DURATION_MS			60 		// length of Status LED flash
+
 #define SETUP_OK_KEY					0xAA4529BA	// MAGIC VALUE. When settings exist in flash this is the valid-flag.
 
 #ifdef USE_DATABASE_APPROACH
-	#define TMR_ITEMS_SENDER_MS			300		// sending of all outgoing items when using the database approach
+	#define TMR_ITEMS_SENDER_MS			150		// sending of all outgoing items when using the database approach
 #endif
 
 typedef enum {

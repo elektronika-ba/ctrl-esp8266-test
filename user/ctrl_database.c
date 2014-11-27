@@ -213,7 +213,10 @@ void ICACHE_FLASH_ATTR ctrl_database_delete_all(void)
 		//}
 	}
 
-	ctrlDatabase = NULL;
+	/*gTXbase = 1;
+	ctrlDatabase = NULL;*/
+
+	ctrl_database_init();
 }
 
 // deletes entry in database by row

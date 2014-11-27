@@ -32,42 +32,25 @@ static void ICACHE_FLASH_ATTR return_to_normal_mode_cb(void *arg)
 	wifi_station_disconnect();
 	wifi_set_opmode(STATION_MODE);
 
-	uart0_sendStr("Restarting system...\r\n");
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("Restarting system...\r\n");
+	#endif
+
 	system_restart();
 }
 
 static void ICACHE_FLASH_ATTR ctrl_config_server_recon(void *arg, sint8 err)
 {
-	/*
-    struct espconn *pesp_conn = (struct espconn *)arg;
-
-	char tmp[100];
-
-    os_sprintf(tmp, "webserver's %d.%d.%d.%d:%d err %d reconnect\n", pesp_conn->proto.tcp->remote_ip[0],
-    		pesp_conn->proto.tcp->remote_ip[1],pesp_conn->proto.tcp->remote_ip[2],
-    		pesp_conn->proto.tcp->remote_ip[3],pesp_conn->proto.tcp->remote_port, err);
-
-    uart0_sendStr(tmp);
-    */
-
-    uart0_sendStr("ctrl_config_server_recon\r\n");
+	#ifdef CTRL_LOGGING
+    	uart0_sendStr("ctrl_config_server_recon\r\n");
+    #endif
 }
 
 static void ICACHE_FLASH_ATTR ctrl_config_server_discon(void *arg)
 {
-    /*
-    struct espconn *pesp_conn = (struct espconn *)arg;
-
-	char tmp[100];
-
-    os_sprintf(tmp, "webserver's %d.%d.%d.%d:%d disconnect\n", pesp_conn->proto.tcp->remote_ip[0],
-        		pesp_conn->proto.tcp->remote_ip[1],pesp_conn->proto.tcp->remote_ip[2],
-        		pesp_conn->proto.tcp->remote_ip[3],pesp_conn->proto.tcp->remote_port);
-
-    uart0_sendStr(tmp);
-    */
-
-    uart0_sendStr("ctrl_config_server_discon\r\n");
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("ctrl_config_server_discon\r\n");
+	#endif
 }
 
 static void ICACHE_FLASH_ATTR ctrl_config_server_recv(void *arg, char *data, unsigned short len)
@@ -117,6 +100,7 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 	if( os_strncmp(page, "wifi", 4) == 0 )
 	{
 		struct station_config stationConf;
+		wifi_station_get_config(&stationConf);
 
 		// saving data?
 		if( save[0] == '1' )
@@ -140,7 +124,7 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 			wifi_station_set_config(&stationConf);
 			wifi_station_connect();
 		}
-		wifi_station_get_config(&stationConf);
+		wifi_station_get_config(&stationConf); //remove?
 
 		// send page back to the browser, byte by byte because we will do templating here
 		char *stream = (char *)pageSetWifi;
@@ -447,7 +431,9 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_connect(void *arg)
 {
     struct espconn *pesp_conn = (struct espconn *)arg;
 
-	uart0_sendStr("ctrl_config_server_connect\r\n");
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("ctrl_config_server_connect\r\n");
+	#endif
 
     espconn_regist_recvcb(pesp_conn, ctrl_config_server_recv);
     espconn_regist_reconcb(pesp_conn, ctrl_config_server_recon);
@@ -458,7 +444,9 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_connect(void *arg)
 // all socket data which is received is flushed into this function
 void ICACHE_FLASH_ATTR ctrl_config_server_init()
 {
-	uart0_sendStr("ctrl_config_server_init()\r\n");
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("ctrl_config_server_init()\r\n");
+	#endif
 
 	os_timer_disarm(&returnToNormalModeTimer);
 	os_timer_setfn(&returnToNormalModeTimer, return_to_normal_mode_cb, NULL);

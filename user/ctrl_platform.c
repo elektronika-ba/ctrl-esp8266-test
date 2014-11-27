@@ -25,6 +25,7 @@
 	static unsigned long TXbase;
 #endif
 
+os_timer_t tmrConfigChecker;
 struct espconn ctrlConn;
 esp_tcp ctrlTcp;
 os_timer_t tmrLinker;
@@ -33,6 +34,7 @@ static tCtrlConnState connState = CTRL_WIFI_CONNECTING;
 
 static unsigned long gTXserver;
 os_timer_t tmrStatusLedBlinker;
+os_timer_t tmrStatusLedBlinkerFlash;
 tCtrlSetup ctrlSetup;
 tCtrlCallbacks ctrlCallbacks;
 static unsigned char outOfSyncCounter;
@@ -157,18 +159,18 @@ static void ICACHE_FLASH_ATTR ctrl_platform_sent_cb(void *arg)
 {
 	struct espconn *pespconn = arg;
 
-	#ifdef CTRL_LOGGING
+	/*#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_sent_cb\r\n");
-    #endif
+    #endif*/
 }
 
 static void ICACHE_FLASH_ATTR ctrl_platform_recv_cb(void *arg, char *pdata, unsigned short len)
 {
 	struct espconn *pespconn = arg;
 
-	#ifdef CTRL_LOGGING
+	/*#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_platform_recv_cb\r\n");
-	#endif
+	#endif*/
 
 	// forward data to CTRL stack
 	ctrl_stack_recv(pdata, len);
@@ -291,13 +293,19 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon(struct espconn *pespconn)
 				uart0_sendStr("ctrl_database_item_sender - ON again\r\n");
 			#endif
 		}
+		else
+		{
+			#ifdef CTRL_LOGGING
+				uart0_sendStr("ctrl_database_item_sender - nothing to send\r\n");
+			#endif
+		}
 	}
 #endif
 
 // blinking status led according to the status of wifi and tcp connection
 static void ICACHE_FLASH_ATTR ctrl_status_led_blinker(void *arg)
 {
-	static unsigned char ledStatusState;
+	/*static unsigned char ledStatusState;
 
 	if(ledStatusState % 2) // & 0x01
 	{
@@ -308,7 +316,17 @@ static void ICACHE_FLASH_ATTR ctrl_status_led_blinker(void *arg)
 		gpio_output_set(0, (1<<LED_STATUS_GPIO), (1<<LED_STATUS_GPIO), 0); // LED OFF
 	}
 
-	ledStatusState++;
+	ledStatusState++;*/
+
+	gpio_output_set((1<<LED_STATUS_GPIO), 0, (1<<LED_STATUS_GPIO), 0); // LED ON
+
+	os_timer_disarm(&tmrStatusLedBlinkerFlash);
+	os_timer_arm(&tmrStatusLedBlinkerFlash, LED_FLASH_DURATION_MS, 0); // don't repeat
+}
+
+static void ICACHE_FLASH_ATTR ctrl_status_led_blinker_flash(void *arg)
+{
+	gpio_output_set(0, (1<<LED_STATUS_GPIO), (1<<LED_STATUS_GPIO), 0); // LED OFF
 }
 
 static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
@@ -438,9 +456,9 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 
 static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 {
-	#ifdef CTRL_LOGGING
+	/*#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_send_data_cb\r\n");
-	#endif
+	#endif*/
 
 	if(connState != CTRL_TCP_CONNECTED && connState != CTRL_AUTHENTICATED)
 	{
@@ -538,15 +556,8 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 }
 
 // this forces device into configuration mode
-/*
 static void ICACHE_FLASH_ATTR ctrl_platform_enter_configuration_mode(void)
 {
-	// wait for button-release
-	while(!GPIO_INPUT_GET(BTN_CONFIG_GPIO))
-	{
-		// wait...
-	}
-
 	wifi_set_opmode(STATIONAP_MODE);
 
 	#ifdef CTRL_LOGGING
@@ -555,7 +566,21 @@ static void ICACHE_FLASH_ATTR ctrl_platform_enter_configuration_mode(void)
 
 	system_restart();
 }
-*/
+
+static void ICACHE_FLASH_ATTR ctrl_platform_config_checker(void *arg)
+{
+	// taken from eshttpd of Sprite_tm, file: io.c
+	static int resetCnt = 0;
+	if (!GPIO_INPUT_GET(BTN_CONFIG_GPIO)) {
+		resetCnt++;
+	}
+	else {
+		if (resetCnt >= 6) { //3 sec pressed
+			ctrl_platform_enter_configuration_mode();
+		}
+		resetCnt = 0;
+	}
+}
 
 // entry point to the ctrl platform
 void ICACHE_FLASH_ATTR ctrl_platform_init(void)
@@ -565,9 +590,14 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 	load_flash_param(ESP_PARAM_SAVE_1, (uint32 *)&ctrlSetup, sizeof(tCtrlSetup));
 	wifi_station_get_config(&stationConf);
 
-// debugging, to always enter config server mode
-//ctrlSetup.stationSetupOk = 0;
-//--
+	PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_GPIO2);
+	PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0);
+	gpio_output_set(0, 0, (1<<LED_STATUS_GPIO), (1<<LED_STATUS_GPIO));
+
+	// taken from eshttpd of Sprite_tm, file: io.c
+	os_timer_disarm(&tmrConfigChecker);
+	os_timer_setfn(&tmrConfigChecker, ctrl_platform_config_checker, NULL);
+	os_timer_arm(&tmrConfigChecker, 500, 1);
 
 	// Must enter into Configuration mode?
 	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY || wifi_get_opmode() != STATION_MODE)
@@ -640,7 +670,6 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 			#ifdef CTRL_LOGGING
 				uart0_sendStr("Restarting in STATION mode...\r\n");
 			#endif
-			//wifi_station_disconnect();
 			wifi_set_opmode(STATION_MODE);
 			system_restart();
 		}
@@ -683,6 +712,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		os_timer_disarm(&tmrStatusLedBlinker);
 		os_timer_setfn(&tmrStatusLedBlinker, (os_timer_func_t *)ctrl_status_led_blinker, NULL);
 		os_timer_arm(&tmrStatusLedBlinker, 200, 1); // actually lets start it right now to blink like WIFI is not available yet. 1 = repeat automatically
+		os_timer_disarm(&tmrStatusLedBlinkerFlash);
+		os_timer_setfn(&tmrStatusLedBlinkerFlash, (os_timer_func_t *)ctrl_status_led_blinker_flash, NULL);
 
 		#ifdef USE_DATABASE_APPROACH
 			// set a timer that will send items from the database (if database approach is used)
