@@ -4,12 +4,8 @@
 #include "c_types.h"
 #include "ctrl_stack.h"
 
-// When defined, spits out various debugging messages on UART
-// and also doesn't use the WEB SERVER to setup the system but
-// uses defined values in code.
-// When defined, you also need to have wifi_debug_params.h file
-// with two string-defines: WIFI_SSID and WIFI_PASS.
-//#define CTRL_DEBUG
+// When defined, will spit out logging messages on UART.
+#define CTRL_LOGGING
 
 // When defined (also include "ctrl_database.h"!), the platform stores
 // outgoing messages in database before sending them to CTRL Server.
@@ -18,6 +14,10 @@
 // When not defined, you need to handle acknowledging current
 // transmission and re-transmitting it if something happens.
 #define USE_DATABASE_APPROACH
+
+// http://g-lab.ca/esp8266ex-gpio-application-programming-interface/
+#define BTN_CONFIG_GPIO 	0			// Button to enter configuration mode of ESP8266
+#define LED_STATUS_GPIO		2			// Status LED that blinks according the the device's current WIFI and tcp-link status
 
 #define SETUP_OK_KEY					0xAA4529BA	// MAGIC VALUE. When settings exist in flash this is the valid-flag.
 

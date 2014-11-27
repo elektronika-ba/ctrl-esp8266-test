@@ -22,7 +22,7 @@ static const char *pageStart = "<html><head><title>CTRL Base Config</title><styl
 static const char *pageEnd = "</form><hr><a href=\"https://my.ctrl.ba\" target=\"_blank\"><i>my.ctrl.ba</i></a>\r\n</body></html>\r\n";
 // html pages (NOTE: make sure you don't have the '{' without the closing '}' !
 static const char *pageIndex = "<h2>Welcome to CTRL Base Config</h2><ul><li><a href=\"?page=wifi\">WIFI Settings</a></li><li><a href=\"?page=ctrl\">CTRL Settings</a></li><li><a href=\"?page=return\">Return Normal Mode</a></li></ul>\r\n";
-static const char *pageSetWifi = "<h2><a href=\"/\">Home</a> / WIFI Settings</h2><input type=\"hidden\" name=\"page\" value=\"wifi\"><table border=\"0\"><tr><td><b>SSID:</b></td><td><input type=\"text\" name=\"ssid\" value=\"{ssid}\" size=\"40\"></td></tr><tr><td><b>Password:</b></td><td><input type=\"text\" name=\"pass\" value=\"{pass}\" size=\"40\"></td></tr><tr><td><b>Status:</b></td><td>{status} <a href=\"?page=wifi\">[refresh]</a></td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td></tr></table>\r\n";
+static const char *pageSetWifi = "<h2><a href=\"/\">Home</a> / WIFI Settings</h2><input type=\"hidden\" name=\"page\" value=\"wifi\"><table border=\"0\"><tr><td><b>SSID:</b></td><td><input type=\"text\" name=\"ssid\" value=\"{ssid}\" size=\"40\"></td></tr><tr><td><b>Password:</b></td><td><input type=\"text\" name=\"pass\" value=\"***\" size=\"40\"></td></tr><tr><td><b>Status:</b></td><td>{status} <a href=\"?page=wifi\">[refresh]</a></td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td></tr></table>\r\n";
 static const char *pageSetCtrl = "<h2><a href=\"/\">Home</a> / CTRL Settings</h2><input type=\"hidden\" name=\"page\" value=\"ctrl\"><table border=\"0\"><tr><td><b>Base ID:</b></td><td><input type=\"text\" name=\"baseid\" value=\"{baseid}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>AES-128 Key:</b></td><td><input type=\"text\" name=\"crypt\" value=\"{crypt}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>Server IP:</b></td><td><input type=\"text\" name=\"ip\" value=\"{ip}\" size=\"18\"></td><td>(78.47.48.138)</td></tr><tr><td><b>Port:</b></td><td><input type=\"text\" name=\"port\" value=\"{port}\" size=\"5\"></td><td>(8000)</td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td><td></td></tr></table>\r\n";
 static const char *pageResetStarted = "<h1>Returning to Normal Mode...</h1>You can close this window now.\r\n";
 static const char *pageSavedInfo = "<br><b style=\"color: green\">Settings Saved!</b>\r\n";
@@ -122,11 +122,19 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct espconn *pt
 		if( save[0] == '1' )
 		{
 			os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
-			os_memset(stationConf.password, 0, sizeof(stationConf.password));
 
 			// copy parameters from URL GET to actual destination in structure
 			ctrl_config_server_get_key_val("ssid", sizeof(stationConf.ssid), request, stationConf.ssid); //32
-			ctrl_config_server_get_key_val("pass", sizeof(stationConf.password), request, stationConf.password); //64
+
+			// set password? we have to hide it...
+			char pass[64];
+			ctrl_config_server_get_key_val("pass", sizeof(pass), request, pass); //64
+			if( os_strncmp(pass, "***", 3) != 0 )
+			{
+				os_memset(stationConf.password, 0, sizeof(stationConf.password));
+				// copy parameters from URL GET to actual destination in structure
+				ctrl_config_server_get_key_val("pass", sizeof(stationConf.password), request, stationConf.password); //64
+			}
 
 			wifi_station_disconnect();
 			wifi_station_set_config(&stationConf);

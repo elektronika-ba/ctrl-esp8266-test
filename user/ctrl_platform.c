@@ -5,6 +5,7 @@
 #include "espconn.h"
 #include "os_type.h"
 #include "driver/uart.h"
+#include "gpio.h"
 
 #include "flash_param.h"
 #include "ctrl_database.h"
@@ -14,10 +15,6 @@
 
 // Include your own custom app here
 #include "ctrl_app_temperature_simulator.h"
-
-#ifdef CTRL_DEBUG
-	#include "wifi_debug_params.h" // DEBUG PARAMETERS
-#endif
 
 #ifdef USE_DATABASE_APPROACH
 	#ifndef CTRL_DATABASE_CAPACITY
@@ -60,7 +57,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_check_ip(void *arg)
     if (wifi_station_get_connect_status() == STATION_GOT_IP && ipconfig.ip.addr != 0)
     {
         connState = CTRL_TCP_CONNECTING;
-        #ifdef CTRL_DEBUG
+        #ifdef CTRL_LOGGING
         	uart0_sendStr("TCP CONNECTING...\r\n");
         #endif
 
@@ -86,14 +83,9 @@ static void ICACHE_FLASH_ATTR ctrl_platform_check_ip(void *arg)
            		wifi_station_get_connect_status() == STATION_CONNECT_FAIL)
 		{
             connState = CTRL_WIFI_CONNECTING_ERROR;
-            #ifdef CTRL_DEBUG
+            #ifdef CTRL_LOGGING
             	uart0_sendStr("WIFI CONNECTING ERROR\r\n");
             #endif
-
-            // maybe this will help my ~22second reconnect?
-            //wifi_station_disconnect();
-            //wifi_station_connect();
-            // NOPE IT DOESN'T :(
 
             os_timer_setfn(&tmrLinker, (os_timer_func_t *)ctrl_platform_check_ip, NULL);
             os_timer_arm(&tmrLinker, 1000, 0); // try now slower
@@ -107,7 +99,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_check_ip(void *arg)
 			ledBlinkerInterval = 1500;
 
             connState = CTRL_WIFI_CONNECTING;
-            #ifdef CTRL_DEBUG
+            #ifdef CTRL_LOGGING
             	uart0_sendStr("WIFI CONNECTING...\r\n");
             #endif
         }
@@ -126,7 +118,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recon_cb(void *arg, sint8 err)
 {
     struct espconn *pespconn = (struct espconn *)arg;
 
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_recon_cb\r\n");
     #endif
 
@@ -140,7 +132,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recon_cb(void *arg, sint8 err)
 		os_timer_disarm(&tmrStatusLedBlinker);
 		os_timer_arm(&tmrStatusLedBlinker, 1000, 1);
 
-        #ifdef CTRL_DEBUG
+        #ifdef CTRL_LOGGING
         	uart0_sendStr("ctrl_platform_recon_cb, 5 failed TCP attempts!\n");
         	uart0_sendStr("Will reconnect in 10s...\r\n");
         #endif
@@ -151,7 +143,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recon_cb(void *arg, sint8 err)
     }
     else
     {
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("Will reconnect in 1s...\r\n");
 		#endif
 
@@ -165,7 +157,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_sent_cb(void *arg)
 {
 	struct espconn *pespconn = arg;
 
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_sent_cb\r\n");
     #endif
 }
@@ -174,7 +166,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recv_cb(void *arg, char *pdata, unsi
 {
 	struct espconn *pespconn = arg;
 
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_platform_recv_cb\r\n");
 	#endif
 
@@ -186,7 +178,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_connect_cb(void *arg)
 {
     struct espconn *pespconn = arg;
 
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_platform_connect_cb\r\n");
 	#endif
 
@@ -222,7 +214,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_connect_cb(void *arg)
 
 static void ICACHE_FLASH_ATTR ctrl_platform_reconnect(struct espconn *pespconn)
 {
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_reconnect\r\n");
     #endif
 
@@ -233,7 +225,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon_cb(void *arg)
 {
     struct espconn *pespconn = arg;
 
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_discon_cb\r\n");
     #endif
 
@@ -241,14 +233,14 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon_cb(void *arg)
 
     if (pespconn == NULL)
     {
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 	    	uart0_sendStr("ctrl_platform_discon_cb - conn is NULL!\r\n");
 	    #endif
         return;
     }
 
     //pespconn->proto.tcp->local_port = espconn_port(); // do I need this?
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		uart0_sendStr("Will reconnect in 1s...\r\n");
 	#endif
 
@@ -259,7 +251,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon_cb(void *arg)
 
 static void ICACHE_FLASH_ATTR ctrl_platform_discon(struct espconn *pespconn)
 {
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
     	uart0_sendStr("ctrl_platform_discon\r\n");
     #endif
 
@@ -275,13 +267,13 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon(struct espconn *pespconn)
 	{
 		os_timer_disarm(&tmrDatabaseItemSender);
 
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("ctrl_database_item_sender\r\n");
 		#endif
 
 		if(connState != CTRL_AUTHENTICATED || !ctrlSynchronized)
 		{
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("ctrl_database_item_sender - not authed or synced\r\n");
 			#endif
 			return;
@@ -295,7 +287,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_discon(struct espconn *pespconn)
 
 			// set us up to execute again
 			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("ctrl_database_item_sender - ON again\r\n");
 			#endif
 		}
@@ -309,11 +301,11 @@ static void ICACHE_FLASH_ATTR ctrl_status_led_blinker(void *arg)
 
 	if(ledStatusState % 2) // & 0x01
 	{
-		// LED ON
+		gpio_output_set((1<<LED_STATUS_GPIO), 0, (1<<LED_STATUS_GPIO), 0); // LED ON
 	}
 	else
 	{
-		// LED OFF
+		gpio_output_set(0, (1<<LED_STATUS_GPIO), (1<<LED_STATUS_GPIO), 0); // LED OFF
 	}
 
 	ledStatusState++;
@@ -322,7 +314,7 @@ static void ICACHE_FLASH_ATTR ctrl_status_led_blinker(void *arg)
 static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 {
 	// do something with msg now
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		char tmp[100];
 		os_sprintf(tmp, "GOT MSG. Length: %u, Header: 0x%X, TXsender: %u\r\n", msg->length, msg->header, msg->TXsender);
 		uart0_sendStr(tmp);
@@ -346,7 +338,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 {
 	// do something with ack now
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		char tmp[100];
 		os_sprintf(tmp, "GOT ACK on TXsender: %u\r\n", msg->TXsender);
 		uart0_sendStr(tmp);
@@ -355,7 +347,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 	// hendliraj out_of_sync koji nam server moze poslati
 	if((msg->header) & CH_OUT_OF_SYNC)
 	{
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("Server is complaining that we are OUT OF SYNC!\r\n");
 		#endif
 
@@ -364,7 +356,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 			outOfSyncCounter = 0;
 
 			#ifdef USE_DATABASE_APPROACH
-				#ifdef CTRL_DEBUG
+				#ifdef CTRL_LOGGING
 					uart0_sendStr("Out of sync (3): Flushing outgoing queue.\r\n");
 				#endif
 
@@ -374,7 +366,7 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 				ctrl_database_delete_all();
 			#endif
 
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("Out of sync (3): Disconnecting!\r\n");
 			#endif
 
@@ -382,14 +374,14 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 		}
 		else
 		{
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				char tmp[50];
 				os_sprintf(tmp, "Out of sync report %u/3.\r\n", outOfSyncCounter);
 				uart0_sendStr(tmp);
 			#endif
 
 			#ifdef USE_DATABASE_APPROACH
-				#ifdef CTRL_DEBUG
+				#ifdef CTRL_LOGGING
 					uart0_sendStr("Re-sending outgoing queue...\r\n");
 				#endif
 
@@ -417,14 +409,14 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 	// auth_err = 0x00 (AUTH OK) or 0x01 (AUTH ERROR)
 	if(auth_err)
 	{
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("CTRL AUTH ERR!\r\n");
 		#endif
 		connState = CTRL_AUTHENTICATION_ERROR;
 	}
 	else
 	{
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("CTRL AUTH OK!\r\n");
 		#endif
 
@@ -446,13 +438,13 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 
 static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 {
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_send_data_cb\r\n");
 	#endif
 
 	if(connState != CTRL_TCP_CONNECTED && connState != CTRL_AUTHENTICATED)
 	{
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("ctrl_send_data_cb - not conn or not authed\r\n");
 		#endif
 		return ESPCONN_CONN;
@@ -492,7 +484,7 @@ static unsigned long ICACHE_FLASH_ATTR ctrl_restore_TXserver_cb(void)
 // returns: 1 on error, 0 on success
 unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short len, unsigned char notification)
 {
-	#ifdef CTRL_DEBUG
+	#ifdef CTRL_LOGGING
 		uart0_sendStr("ctrl_platform_send\r\n");
 	#endif
 
@@ -501,7 +493,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 		{
 			if(connState != CTRL_AUTHENTICATED || !ctrlSynchronized)
 			{
-				#ifdef CTRL_DEBUG
+				#ifdef CTRL_LOGGING
 					uart0_sendStr("ctrl_platform_send not authed or not synced\r\n");
 				#endif
 				return 1;
@@ -513,7 +505,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 		{
 			if(!ctrlSynchronized)
 			{
-				#ifdef CTRL_DEBUG
+				#ifdef CTRL_LOGGING
 					uart0_sendStr("ctrl_platform_send not synced\r\n");
 				#endif
 				return 1;
@@ -532,7 +524,7 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 	#else
 		if(connState != CTRL_AUTHENTICATED)
 		{
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("ctrl_platform_send not authed\r\n");
 			#endif
 			return 1;
@@ -545,74 +537,46 @@ unsigned char ICACHE_FLASH_ATTR ctrl_platform_send(char *data, unsigned short le
 	#endif
 }
 
+// this forces device into configuration mode
+/*
+static void ICACHE_FLASH_ATTR ctrl_platform_enter_configuration_mode(void)
+{
+	// wait for button-release
+	while(!GPIO_INPUT_GET(BTN_CONFIG_GPIO))
+	{
+		// wait...
+	}
+
+	wifi_set_opmode(STATIONAP_MODE);
+
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("Restarting in STATIONAP mode...\r\n");
+	#endif
+
+	system_restart();
+}
+*/
+
 // entry point to the ctrl platform
 void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 {
 	struct station_config stationConf;
 
-	#ifndef CTRL_DEBUG
-		load_flash_param(ESP_PARAM_SAVE_1, (uint32 *)&ctrlSetup, sizeof(tCtrlSetup));
-		wifi_station_get_config(&stationConf);
-	#else
-		uart0_sendStr("Debugging, will not start configuration web server.\r\n");
-
-		ctrlSetup.stationSetupOk = SETUP_OK_KEY;
-
-		// tcp://ctrl.ba:8000
-		ctrlSetup.serverIp[0] = 78; // ctrlSetup.serverIp = {78, 47, 48, 138};
-		ctrlSetup.serverIp[1] = 47;
-		ctrlSetup.serverIp[2] = 48;
-		ctrlSetup.serverIp[3] = 138;
-
-		ctrlSetup.serverPort = 8000;
-
-		// my test Base
-		ctrlSetup.baseid[0] = 0xaa;
-		ctrlSetup.baseid[1] = 0xcc;
-		ctrlSetup.baseid[2] = 0xa5;
-		ctrlSetup.baseid[3] = 0x39;
-		ctrlSetup.baseid[4] = 0xd1;
-		ctrlSetup.baseid[5] = 0x59;
-		ctrlSetup.baseid[6] = 0xa7;
-		ctrlSetup.baseid[7] = 0xca;
-		ctrlSetup.baseid[8] = 0x30;
-		ctrlSetup.baseid[9] = 0x0a;
-		ctrlSetup.baseid[10] = 0xee;
-		ctrlSetup.baseid[11] = 0x98;
-		ctrlSetup.baseid[12] = 0xde;
-		ctrlSetup.baseid[13] = 0xda;
-		ctrlSetup.baseid[14] = 0x7e;
-		ctrlSetup.baseid[15] = 0x92;
-
-		os_memset(stationConf.ssid, 0, sizeof(stationConf.ssid));
-		os_memset(stationConf.password, 0, sizeof(stationConf.password));
-
-		os_sprintf(stationConf.ssid, "%s", WIFI_SSID);
-		os_sprintf(stationConf.password, "%s", WIFI_PASS);
-
-		wifi_station_set_config(&stationConf);
-	#endif
+	load_flash_param(ESP_PARAM_SAVE_1, (uint32 *)&ctrlSetup, sizeof(tCtrlSetup));
+	wifi_station_get_config(&stationConf);
 
 // debugging, to always enter config server mode
 //ctrlSetup.stationSetupOk = 0;
 //--
 
 	// Must enter into Configuration mode?
-	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY /*|| wifi_get_opmode() != STATION_MODE*/)
+	if(ctrlSetup.stationSetupOk != SETUP_OK_KEY || wifi_get_opmode() != STATION_MODE)
 	{
-		#ifdef CTRL_DEBUG
-			wifi_set_opmode(STATION_MODE);
-
-			uart0_sendStr("I am not in STATION mode, restarting in STATION mode...\r\n");
-			system_restart();
-		#endif
-
 		// make sure we are in STATIONAP_MODE for configuration server to work
 		if(wifi_get_opmode() != STATIONAP_MODE)
 		{
-			//wifi_station_disconnect();
 			wifi_set_opmode(STATIONAP_MODE);
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("Restarting in STATIONAP mode...\r\n");
 			#endif
 			system_restart();
@@ -622,6 +586,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		wifi_get_macaddr(SOFTAP_IF, macaddr);
 
 		// TODO: find a better way of setting this password so that anybody sniffing can't simply read it out
+		// or even worse, sniff our SSID and PASSWORD during configuration procedure that will follow!
 		// One idea is to blink the numerical password on status LED? Not very user friendly...
 		struct softap_config apConfig;
 		os_memset(apConfig.ssid, 0, sizeof(apConfig.ssid));
@@ -635,7 +600,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 
 		wifi_softap_set_config(&apConfig);
 
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			char temp[80];
 			os_sprintf(temp, "OPMODE: %u\r\n", wifi_get_opmode());
 			uart0_sendStr(temp);
@@ -660,7 +625,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 	}
 	else
 	{
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("Starting in normal mode...\r\n");
 		#endif
 
@@ -672,7 +637,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 
 		if(wifi_get_opmode() != STATION_MODE)
 		{
-			#ifdef CTRL_DEBUG
+			#ifdef CTRL_LOGGING
 				uart0_sendStr("Restarting in STATION mode...\r\n");
 			#endif
 			//wifi_station_disconnect();
@@ -680,12 +645,12 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 			system_restart();
 		}
 
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			char temp[80];
 			os_sprintf(temp, "OPMODE: %u\r\n", wifi_get_opmode());
 			uart0_sendStr(temp);
-			os_sprintf(temp, "SSID: %s\r\n", stationConf.ssid);
-			uart0_sendStr(temp);
+			//os_sprintf(temp, "SSID: %s\r\n", stationConf.ssid);
+			//uart0_sendStr(temp);
 			os_sprintf(temp, "PWD: %s\r\n", stationConf.password);
 			uart0_sendStr(temp);
 		#endif
@@ -705,7 +670,7 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		// Init the user-app callbacks
 		ctrl_app_init(&ctrlAppCallbacks);
 
-		#ifdef CTRL_DEBUG
+		#ifdef CTRL_LOGGING
 			uart0_sendStr("System initialization done!\r\n");
 		#endif
 
