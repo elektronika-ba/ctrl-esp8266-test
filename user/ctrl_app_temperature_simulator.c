@@ -25,7 +25,7 @@ static void ICACHE_FLASH_ATTR ctrl_app_temperature_simulator_simulate(void *arg)
 	}
 	else
 	{
-		uart0_sendStr("> Temperature send :)\r\n");
+		uart0_sendStr("> Temperature sent :)\r\n");
 	}
 }
 
