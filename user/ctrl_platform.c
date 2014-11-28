@@ -135,7 +135,7 @@ static void ICACHE_FLASH_ATTR ctrl_platform_recon_cb(void *arg, sint8 err)
 		os_timer_arm(&tmrStatusLedBlinker, 1000, 1);
 
         #ifdef CTRL_LOGGING
-        	uart0_sendStr("ctrl_platform_recon_cb, 5 failed TCP attempts!\n");
+        	uart0_sendStr("ctrl_platform_recon_cb, 5 failed TCP attempts!\r\n");
         	uart0_sendStr("Will reconnect in 10s...\r\n");
         #endif
 
