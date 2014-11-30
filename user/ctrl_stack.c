@@ -4,6 +4,8 @@
 #include "mem.h"
 #include "espconn.h" // only for ESPCONN_OK enum
 #include "driver/uart.h"
+#include "aes_cbc.h"
+#include "ctrl_platform.h"
 
 #include "ctrl_stack.h"
 
@@ -212,10 +214,16 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			// entire message found in buffer, lets process it
 			os_timer_disarm(&tmrDataExpecter);
 
-			// TODO: When everything is finished, add DECRYPTION function here that will decrypt HEADER+TXSENDER+DATA buffer stream.
-			// "Length" part of the message can't be encrypted because message stream might come in segmented TCP packages.
-			// Who cares if they can see the length of the message anyway, right? They can easily calculate the length by simply counting
-			// the bytes that arrive, but the CTRL stack (we) can't rely on that as data might arrive segmented, as previously noted.
+			// decrypt the received message if this is not an authentication reply
+			if(!authMode)
+			{
+				// TODO: When everything is finished, add DECRYPTION function here that will decrypt HEADER+TXSENDER+DATA buffer stream.
+				// "Length" part of the message can't be encrypted because message stream might come in segmented TCP packages.
+				// Who cares if they can see the length of the message anyway, right? They can easily calculate the length by simply counting
+				// the bytes that arrive, but the CTRL stack (we) can't rely on that as data might arrive segmented, as previously noted.
+
+				// (authentication reply is not encrypted)
+			}
 
 			// Lets parse it into tCtrlMessage type
 			tCtrlMessage msg;
@@ -293,6 +301,10 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 		return 1;
 	}
 
+	// NOTE: This will be changed once AES encryption is completed...
+	// TODO: Once everything is finished, add ENCRYPTION here. Data to be encrypted is Header+TXsender+Data. Length is not encrypted!
+	// I will probably have to concatenate the data bellow into one byte-stream for encryption procedure to be possible.
+
 	// Length
 	char length[2];
 	os_memcpy(length, &msg->length, 2);
@@ -301,9 +313,6 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 	{
 		return 1; // abort further sending
 	}
-
-	// TODO: Once everything is finished, add ENCRYPTION here. Data to be encrypted is Header+TXsender+Data. Length is not encrypted!
-	// I will probably have to concatenate the data bellow into one byte-stream for encryption procedure to be possible.
 
 	// Header
 	if(ctrlCallbacks->send_data((char *)&msg->header, 1) != ESPCONN_OK)
@@ -365,11 +374,49 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 
 	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
 
+	char authStream[48];
+	os_memcpy(authStream, baseid, 16);
+	os_memcpy(authStream+32, baseid, 16);
+	unsigned char i = 0;
+	for(i=0; i<4; i++)
+	{
+		unsigned long r = rand();
+		os_memcpy(authStream+16+(i*4), &r, 4);
+	}
+
+	/*
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("AUTH PLAINTEXT:");
+		for(i=0; i<48; i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", authStream[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif
+	*/
+
+	aes128_cbc_encrypt(authStream+16, 32, aes128Key);
+
+	/*
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("AUTH ENCRYPTED:");
+		for(i=0; i<48; i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", authStream[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif
+	*/
+
 	tCtrlMessage msg;
-	msg.length = 1 + 4 + 16;
-	msg.header = 0x00;
-	msg.TXsender = 0; // not relevant during authentication procedure
-	msg.data = baseid; //(char *)os_malloc(16); os_memcpy(msg.data, baseid, 16);
+	msg.length = 1 + 4 + 48;
+	msg.header = 0x00; // NOTE: header and TXsender are not encrypted during authentication procedure
+	msg.TXsender = 0; // value not relevant during authentication procedure
+	msg.data = authStream; //contains: baseid + encrypt(baseid + random 16 bytes)
 
 	// We have nothing pending to send? (TXbase is 1 in that case)
 	if(sync == 1)

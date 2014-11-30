@@ -468,17 +468,17 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		return ESPCONN_CONN;
 	}
 
-	/*
-	uart0_sendStr("SENDING: ");
-	unsigned short i;
-	for(i=0; i<len; i++)
-	{
-		char tmp2[10];
-		os_sprintf(tmp2, " 0x%X", data[i]);
-		uart0_sendStr(tmp2);
-	}
-	uart0_sendStr(".\r\n");
-	*/
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("TCP SENDING:");
+		unsigned short i;
+		for(i=0; i<len; i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", data[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif
 
 	return espconn_sent(&ctrlConn, data, len);
 }
