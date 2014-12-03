@@ -13,26 +13,15 @@ os_timer_t tmrDataExpecter;
 
 static unsigned long TXserver;
 static char *baseid;
-static char *aes128Key;
 static char *rxBuff = NULL;
 static unsigned short rxBuffLen;
 static unsigned char authMode;
 static tCtrlCallbacks *ctrlCallbacks;
 static unsigned char backoff;
-
-// for changing endianness
-void ICACHE_FLASH_ATTR reverse_buffer(char *data, unsigned short len)
-{
-	// http://stackoverflow.com/questions/2182002/convert-big-endian-to-little-endian-in-c-without-using-provided-func
-	char *p = data;
-    size_t lo, hi;
-    for(lo=0, hi=len-1; hi>lo; lo++, hi--)
-    {
-        char tmp = p[lo];
-        p[lo] = p[hi];
-        p[hi] = tmp;
-    }
-}
+static char *activeAes128Key; // pointer to key being used
+static char *aes128Key; // secret key
+static char authAes128Key[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; // must remain all 0!
+static char random16bytes[16]; // IV for encryption
 
 // find first message and return its length. 0 = not found, since CTRL message always has a length (it has at least header byte)!
 static unsigned short ICACHE_FLASH_ATTR ctrl_find_message(char *data, unsigned short len)
@@ -41,13 +30,12 @@ static unsigned short ICACHE_FLASH_ATTR ctrl_find_message(char *data, unsigned s
 
 	if(len < 2) return 0;
 
-	os_memcpy(&length, data, 2); // hopefully endiannes will match between this compiler and NodeJS on the Cloud server
-	reverse_buffer((char *)&length, 2); // nope, it doesn't so lets fix endianness now
+	os_memcpy(&length, data, 2); // little endian
 
 	// entire message available in buffer?
 	if(length <= len)
 	{
-		return length + 2; // +2 because Length field of CTRL protocol is 2 bytes long
+		return length; // 2-12-2015 commented: + 2; // +2 because ALL_LENGTH field of CTRL protocol is 2 bytes long
 	}
 
 	return 0;
@@ -59,6 +47,9 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	// if we are currently in the authorization mode, process received data differently
 	if(authMode)
 	{
+		authMode = 0;
+		activeAes128Key = (char *)&aes128Key; // set the Base's secret key as the active one
+
 		if((msg->header) & CH_SYNC)
 		{
 			TXserver = 0;
@@ -75,7 +66,6 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 		{
 			ctrlCallbacks->auth_response(*(msg->data));
 		}
-		authMode = 0;
 	}
 	else
 	{
@@ -208,35 +198,90 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 	unsigned short processedLen = 0;
 	while(processedLen < rxBuffLen)
 	{
-		unsigned short msgLen = ctrl_find_message(rxBuff+processedLen, rxBuffLen-processedLen);
-		if(msgLen > 0)
+		unsigned short allLength = ctrl_find_message(rxBuff+processedLen, rxBuffLen-processedLen);
+		if(allLength > 0)
 		{
 			// entire message found in buffer, lets process it
 			os_timer_disarm(&tmrDataExpecter);
 
-			// decrypt the received message if this is not an authentication reply
-			if(!authMode)
+			// messages must come in 16 byte blocks (minus the first two bytes for [ALL_LENGTH]). ctrl_find_message() doesn't include ALL_LENGTH in result
+			if(!(allLength % 16))
 			{
-				// TODO: When everything is finished, add DECRYPTION function here that will decrypt HEADER+TXSENDER+DATA buffer stream.
-				// "Length" part of the message can't be encrypted because message stream might come in segmented TCP packages.
-				// Who cares if they can see the length of the message anyway, right? They can easily calculate the length by simply counting
-				// the bytes that arrive, but the CTRL stack (we) can't rely on that as data might arrive segmented, as previously noted.
+				// Packet structure:
+				// [ALL_LENGTH] { [RANDOM_IV] [MESSAGE_LENGTH] [HEADER] [TX_SENDER] [DATA] [padding when needed] } [CMAC]
+				// 		2             16              2           1          4        n              m               16
 
-				// (authentication reply is not encrypted)
+				char *msgPtr = rxBuff+processedLen+2; // skip the ALL_LENGTH field
+
+				#ifdef CTRL_LOGGING
+					char tmp[80];
+					os_sprintf(tmp, "unpacking %d bytes:", allLength);
+					uart0_sendStr(tmp);
+
+					unsigned short i;
+					for(i=0; i<(allLength); i++)
+					{
+						char tmp2[10];
+						os_sprintf(tmp2, " 0x%X", msgPtr[i]);
+						uart0_sendStr(tmp2);
+					}
+					uart0_sendStr(".\r\n");
+				#endif
+
+				// Verify CMAC
+				char calculatedCmac[16];
+				cmac_generate(activeAes128Key, msgPtr, allLength-16, calculatedCmac);
+				if(os_strncmp(calculatedCmac, msgPtr+allLength-16, 16) == 0)
+				{
+					#ifdef CTRL_LOGGING
+						uart0_sendStr("CMAC VERIFIED!\r\n");
+					#endif
+
+					// Decrypt
+					aes128_cbc_decrypt(msgPtr, allLength-16, activeAes128Key);
+
+					msgPtr += 16; // skip IV
+
+					// Lets parse it into tCtrlMessage type
+					tCtrlMessage msg;
+
+					// Take MSG_LENGTH
+					os_memcpy((char *)&msg.length, msgPtr, 2); // little endian
+					msgPtr += 2;
+
+					// Take HEADER
+					os_memcpy(&msg.header, msgPtr, 1);
+					msgPtr += 1;
+
+					// Take TXsender
+					os_memcpy((char *)&msg.TXsender, msgPtr, 4); // little endian
+					msgPtr += 4;
+
+					// Take data. Don't care about discard padding and CMAC because
+					// whoever reads this "msg" will consider msg.length to calculate
+					// the actual length of msg.data!
+					msg.data = msgPtr;
+
+					// Process
+					ctrl_stack_process_message(&msg);
+				}
+				#ifdef CTRL_LOGGING
+				else
+				{
+					uart0_sendStr("CMAC NOT VERIFIED!\r\n");
+				}
+				#endif
 			}
+			#ifdef CTRL_LOGGING
+			else
+			{
+				char tmp[80];
+				os_sprintf(tmp, "error, packet (%d) is not in 16 byte blocks!", allLength);
+				uart0_sendStr(tmp);
+			}
+			#endif
 
-			// Lets parse it into tCtrlMessage type
-			tCtrlMessage msg;
-			os_memcpy((char *)&msg.length, rxBuff+processedLen, 2);
-			reverse_buffer((char *)&msg.length, 2); // lets fix endianness
-			os_memcpy(&msg.header, rxBuff+processedLen+2, 1);
-			os_memcpy((char *)&msg.TXsender, rxBuff+processedLen+2+1, 4);
-			reverse_buffer((char *)&msg.TXsender, 4); // lets fix endianness
-			msg.data = rxBuff+processedLen+2+1+4; // omg
-
-			ctrl_stack_process_message(&msg);
-
-			processedLen += msgLen;
+			processedLen += allLength;
 			rxBuffLen = rxBuffLen-processedLen;
 		}
 		else
@@ -301,42 +346,78 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 		return 1;
 	}
 
-	// NOTE: This will be changed once AES encryption is completed...
-	// TODO: Once everything is finished, add ENCRYPTION here. Data to be encrypted is Header+TXsender+Data. Length is not encrypted!
-	// I will probably have to concatenate the data bellow into one byte-stream for encryption procedure to be possible.
+	// Packet structure:
+	// [ALL_LENGTH] { [RANDOM_IV] [MESSAGE_LENGTH] [HEADER] [TX_SENDER] [DATA] [padding when needed] } [CMAC]
+	// 		2             16              2           1          4        n              m               16
 
-	// Length
-	char length[2];
-	os_memcpy(length, &msg->length, 2);
-	reverse_buffer(length, 2); // convert to LITTLE ENDIAN!
-	if(ctrlCallbacks->send_data(length, 2) != ESPCONN_OK)
+	// We need to allocate memory to fit everything into single byte-stream! Lets hope we will have enough memory to fit the provided "msg".
+	unsigned char paddThisMuch = 16 - ((16 + 2 + msg->length) % 16);
+	unsigned int allocateThisMuch = 2 + 16 + 2 + msg->length + paddThisMuch + 16; // dude!
+
+	// package too long, can't fit so we will not even try!
+	if(allocateThisMuch > 0xFFFF)
 	{
-		return 1; // abort further sending
+		return 1;
 	}
 
-	// Header
-	if(ctrlCallbacks->send_data((char *)&msg->header, 1) != ESPCONN_OK)
+	char *toSend = (char *)os_zalloc(allocateThisMuch); // use os_zalloc for easier debugging
+	if(toSend == NULL)
 	{
-		return 1; // abort further sending
+		return 1;
 	}
 
-	// TXsender
-	char TXsender[4];
-	os_memcpy(TXsender, &msg->TXsender, 4);
-	reverse_buffer(TXsender, 4); // convert to LITTLE ENDIAN!
-	if(ctrlCallbacks->send_data(TXsender, 4) != ESPCONN_OK)
-	{
-		return 1; // abort further sending
-	}
+	// Copy ALL_LENGTH, since we already know it
+	unsigned short all_length = allocateThisMuch-2;
+	os_memcpy(toSend, &all_length, 2);
 
-	// Data (if there is data)
+	char *toSendTempPtr = toSend + 2; // for simpler copying bellow
+	// Copy IV (random16bytes) to its position
+	os_memcpy(toSendTempPtr, random16bytes, 16);
+	toSendTempPtr += 16;
+
+	// Copy msg.length
+	os_memcpy(toSendTempPtr, &msg->length, 2);
+	toSendTempPtr += 2;
+
+	// Copy msg.header
+	os_memcpy(toSendTempPtr, &msg->header, 1);
+	toSendTempPtr += 1;
+
+	// Copy msg.TXsender
+	os_memcpy(toSendTempPtr, &msg->TXsender, 4);
+	toSendTempPtr += 4;
+
+	// Copy msg.data (if any)
 	if(msg->length-5 > 0)
 	{
-		if(ctrlCallbacks->send_data(msg->data, msg->length-5))
-		{
-			return 1;
-		}
+		os_memcpy(toSendTempPtr, msg->data, msg->length-5);
+		toSendTempPtr += msg->length-5;
 	}
+
+	// Now add padding if required (we already calculated how much at the beginning)
+	if(paddThisMuch > 0)
+	{
+		os_memcpy(toSendTempPtr, random16bytes, paddThisMuch); // lets use random16bytes as source for padding
+		toSendTempPtr += paddThisMuch;
+	}
+
+	// Now encrypt the plaintext (but skip first 2 bytes of [ALL_LENGTH])
+	aes128_cbc_encrypt(toSend+2, (toSendTempPtr-toSend-2), activeAes128Key);
+
+	// Now calculate CMAC over entire ciphertext (but skip first 2 bytes of [ALL_LENGTH]) and place it at the last 16 bytes of toSend!
+	cmac_generate(activeAes128Key, toSend+2, (toSendTempPtr-toSend-2), toSendTempPtr);
+
+	// prepare IV for next encryption (lets use last 16 bytes, actually that's the CMAC of current encryption... this is supposed to be "safe to do" in AES-CBC mode)
+	os_memcpy(random16bytes, toSendTempPtr, 16);
+
+	// That should be it, now send it to Server!
+	if(ctrlCallbacks->send_data(toSend, allocateThisMuch) != ESPCONN_OK)
+	{
+		os_free(toSend);
+		return 1;
+	}
+
+	os_free(toSend);
 
 	return 0;
 }
@@ -372,7 +453,13 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 	baseid = baseid_;
 	aes128Key = aes128Key_;
 
+	activeAes128Key = (char *)&authAes128Key; // active key during AUTH is all zeroes (don't worry, it is not as dangerous as it sounds)
+
 	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
+
+	// !!!!!!!!!!!!!!!
+	// IMPORTANT TODO: MAKE SOME KIND OF ENCRYPTED CHALLANGE-RESPONSE AUTHENTICATION
+	// !!!!!!!!!!!!!!!
 
 	char authStream[48];
 	os_memcpy(authStream, baseid, 16);
@@ -380,43 +467,17 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 	unsigned char i = 0;
 	for(i=0; i<4; i++)
 	{
-		unsigned long r = rand();
+		unsigned long r = system_get_time() + rand(); // TODO: make better random generation here? system_get_time() will have only one value in this loop...
 		os_memcpy(authStream+16+(i*4), &r, 4);
 	}
 
-	/*
-	#ifdef CTRL_LOGGING
-		uart0_sendStr("AUTH PLAINTEXT:");
-		for(i=0; i<48; i++)
-		{
-			char tmp2[10];
-			os_sprintf(tmp2, " 0x%X", authStream[i]);
-			uart0_sendStr(tmp2);
-		}
-		uart0_sendStr(".\r\n");
-	#endif
-	*/
-
-	aes128_cbc_encrypt(authStream+16, 32, aes128Key);
-
-	/*
-	#ifdef CTRL_LOGGING
-		uart0_sendStr("AUTH ENCRYPTED:");
-		for(i=0; i<48; i++)
-		{
-			char tmp2[10];
-			os_sprintf(tmp2, " 0x%X", authStream[i]);
-			uart0_sendStr(tmp2);
-		}
-		uart0_sendStr(".\r\n");
-	#endif
-	*/
+	aes128_cbc_encrypt(authStream+16, 32, aes128Key); // encrypt auth message with the secret key of Base
 
 	tCtrlMessage msg;
 	msg.length = 1 + 4 + 48;
-	msg.header = 0x00; // NOTE: header and TXsender are not encrypted during authentication procedure
+	msg.header = 0x00; // value not relevant during authentication procedure
 	msg.TXsender = 0; // value not relevant during authentication procedure
-	msg.data = authStream; //contains: baseid + encrypt(baseid + random 16 bytes)
+	msg.data = authStream; //contains: baseid + encrypt(random 16 bytes + baseid)
 
 	// We have nothing pending to send? (TXbase is 1 in that case)
 	if(sync == 1)
@@ -432,6 +493,13 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 		os_timer_disarm(&tmrDataExpecter);
 		os_free(rxBuff);
 		rxBuff = NULL;
+	}
+
+	// prepare IV for very first encryption of the "msg"
+	for(i=0; i<4; i++)
+	{
+		unsigned long r = rand(); // here this randomness is not *that* important since the authKey is known to everyone (zeroes)
+		os_memcpy(random16bytes+(i*4), &r, 4);
 	}
 
 	ctrl_stack_send_msg(&msg);

@@ -615,11 +615,11 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		char macaddr[6];
 		wifi_get_macaddr(SOFTAP_IF, macaddr);
 
-		struct ip_info ipinfo;
+		/*struct ip_info ipinfo;
 		IP4_ADDR(&ipinfo.ip, 10, 10, 10, 1);
 		IP4_ADDR(&ipinfo.gw, 10, 10, 10, 1);
 		IP4_ADDR(&ipinfo.netmask, 255, 255, 255, 0);
-		wifi_set_ip_info(SOFTAP_IF, &ipinfo);
+		wifi_set_ip_info(SOFTAP_IF, &ipinfo);*/
 
 		// TODO: find a better way of setting this password so that anybody sniffing can't simply read it out
 		// or even worse, sniff our SSID and PASSWORD during configuration procedure that will follow!
@@ -646,8 +646,8 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 			uart0_sendStr(temp);
 			os_sprintf(temp, "CHANNEL: %u\r\n", apConfig.channel);
 			uart0_sendStr(temp);
-			os_sprintf(temp, "CONFIGURATION WEB SERVER IP: " IPSTR "\r\n", IP2STR(&ipinfo.ip));
-			uart0_sendStr(temp);
+			/*os_sprintf(temp, "CONFIGURATION WEB SERVER IP: " IPSTR "\r\n", IP2STR(&ipinfo.ip));
+			uart0_sendStr(temp);*/
 			uart0_sendStr("Starting configuration web server...\r\n");
 		#endif
 

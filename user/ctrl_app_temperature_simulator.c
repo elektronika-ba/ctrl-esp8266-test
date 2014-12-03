@@ -16,8 +16,6 @@ static void ICACHE_FLASH_ATTR ctrl_app_temperature_simulator_simulate(void *arg)
 	unsigned long temper;
 	temper = rand();
 
-	reverse_buffer((char *)&temper, 4); // fix endianness
-
 	// send via CTRL stack to Server
 	if(ctrl_platform_send((char *)&temper, 4, 1)) // send as notification
 	{

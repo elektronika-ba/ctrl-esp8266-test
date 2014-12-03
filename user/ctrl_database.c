@@ -32,8 +32,8 @@ void ICACHE_FLASH_ATTR ctrl_database_ack_row(unsigned long TXbase)
 		{
 			(tmp->row)->acked = 1;
 
-			char stmp[50];
-			os_sprintf(stmp, "DB acked on TXbase = %u\r\n", TXbase);
+			//char stmp[50];
+			//os_sprintf(stmp, "DB acked on TXbase = %u\r\n", TXbase);
 			//uart0_sendStr(stmp);
 
 			break;
@@ -63,8 +63,8 @@ tDatabaseRow * ICACHE_FLASH_ATTR ctrl_database_get_next_txbase2server(void)
 		{
 			(tmp->row)->sent = 1;
 
-			char stmp[50];
-			os_sprintf(stmp, "TXbase = %u\r\n", (tmp->row)->TXbase);
+			//char stmp[50];
+			//os_sprintf(stmp, "TXbase = %u\r\n", (tmp->row)->TXbase);
 			//uart0_sendStr(stmp);
 
 			return tmp->row;
@@ -83,8 +83,8 @@ void ICACHE_FLASH_ATTR ctrl_database_unsend_all(void)
 	tNode *tmp = ctrlDatabase;
 	while(tmp != NULL)
 	{
-		char stmp[20];
-		os_sprintf(stmp, " %u", (tmp->row)->TXbase);
+		//char stmp[20];
+		//os_sprintf(stmp, " %u", (tmp->row)->TXbase);
 		//uart0_sendStr(stmp);
 
 		(tmp->row)->sent = 0;
@@ -112,8 +112,8 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_add_row(char *data, unsigned short
 	// Increment TXbase to be assigned because to next row... We flush the queue during operation and we need to keep track of last TXbase we've sent out
 	gTXbase++;
 
-	char stmp[50];
-	os_sprintf(stmp, "DB added new row TXbase = %u\r\n", gTXbase-1);
+	//char stmp[50];
+	//os_sprintf(stmp, "DB added new row TXbase = %u\r\n", gTXbase-1);
 	//uart0_sendStr(stmp);
 
 	return ctrl_database_add_node(row);
@@ -129,8 +129,8 @@ void ICACHE_FLASH_ATTR ctrl_database_flush_acked(void)
 	{
 		if((tmp->row)->acked == 1)
 		{
-			char stmp[20];
-			os_sprintf(stmp, " %u", (tmp->row)->TXbase);
+			//char stmp[20];
+			//os_sprintf(stmp, " %u", (tmp->row)->TXbase);
 			//uart0_sendStr(stmp);
 
 			tmp = ctrl_database_delete_by_TXbase((tmp->row)->TXbase); // returns the element which pointed to the deleted one so we can continue
@@ -182,8 +182,8 @@ unsigned char ICACHE_FLASH_ATTR ctrl_database_count_unacked_items(void)
 		tmp = tmp->next;
 	}
 
-	char stmp[50];
-	os_sprintf(stmp, "DB count unacked: %u\r\n", count);
+	//char stmp[50];
+	//os_sprintf(stmp, "DB count unacked: %u\r\n", count);
 	//uart0_sendStr(stmp);
 
 	return count;
@@ -267,8 +267,8 @@ static tNode * ICACHE_FLASH_ATTR ctrl_database_delete_by_TXbase(unsigned long TX
 	os_free(temp->row);
 	os_free(temp);
 
-	char stmp[50];
-	os_sprintf(stmp, "DB deleted TXbase = %u\r\n", TXbase);
+	//char stmp[50];
+	//os_sprintf(stmp, "DB deleted TXbase = %u\r\n", TXbase);
 	//uart0_sendStr(stmp);
 
 	return pointer;
