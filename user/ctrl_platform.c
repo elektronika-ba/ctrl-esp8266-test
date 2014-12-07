@@ -422,10 +422,10 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 	}
 }
 
-static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
+static void ICACHE_FLASH_ATTR ctrl_auth_response_cb()
 {
 	// auth_err = 0x00 (AUTH OK) or 0x01 (AUTH ERROR)
-	if(auth_err)
+	/*if(auth_err)
 	{
 		#ifdef CTRL_LOGGING
 			uart0_sendStr("CTRL AUTH ERR!\r\n");
@@ -433,9 +433,9 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 		connState = CTRL_AUTHENTICATION_ERROR;
 	}
 	else
-	{
+	{*/
 		#ifdef CTRL_LOGGING
-			uart0_sendStr("CTRL AUTH OK!\r\n");
+			uart0_sendStr("CTRL Authenticated!\r\n");
 		#endif
 
 		connState = CTRL_AUTHENTICATED;
@@ -451,7 +451,7 @@ static void ICACHE_FLASH_ATTR ctrl_auth_response_cb(unsigned char auth_err)
 				os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
 			}
 		#endif
-	}
+	/*}*/
 }
 
 static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
@@ -468,6 +468,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		return ESPCONN_CONN;
 	}
 
+	/*
 	#ifdef CTRL_LOGGING
 		uart0_sendStr("TCP SENDING:");
 		unsigned short i;
@@ -479,6 +480,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		}
 		uart0_sendStr(".\r\n");
 	#endif
+	*/
 
 	return espconn_sent(&ctrlConn, data, len);
 }

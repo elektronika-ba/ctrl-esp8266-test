@@ -16,11 +16,11 @@ static char *baseid;
 static char *rxBuff = NULL;
 static unsigned short rxBuffLen;
 static unsigned char authMode;
+static unsigned char authPhase;
+static unsigned char authSync;
 static tCtrlCallbacks *ctrlCallbacks;
 static unsigned char backoff;
-static char *activeAes128Key; // pointer to key being used
 static char *aes128Key; // secret key
-static char authAes128Key[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; // must remain all 0!
 static char random16bytes[16]; // IV for encryption
 
 // find first message and return its length. 0 = not found, since CTRL message always has a length (it has at least header byte)!
@@ -47,24 +47,58 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 	// if we are currently in the authorization mode, process received data differently
 	if(authMode)
 	{
-		authMode = 0;
-		activeAes128Key = (char *)&aes128Key; // set the Base's secret key as the active one
+		// receiving challenge?
+		// we must answer to it here
+		if(authPhase == 1)
+		{
+			authPhase++;
 
-		if((msg->header) & CH_SYNC)
-		{
-			TXserver = 0;
-		}
-		else
-		{
-			if(ctrlCallbacks->restore_TXserver != NULL)
+			char challResponse[32];
+			unsigned char i = 0;
+			for(i=0; i<4; i++)
 			{
-				TXserver = ctrlCallbacks->restore_TXserver();
+				unsigned long r = system_get_time() + rand(); // TODO: make better random generation here? system_get_time() will probably have only one value in this loop...
+				os_memcpy(challResponse+(i*4), &r, 4);
 			}
-		}
+			os_memcpy(challResponse+16, msg->data, 16);
 
-		if(ctrlCallbacks->auth_response != NULL)
+			tCtrlMessage msg;
+			msg.length = 1 + 4 + 32;
+			msg.header = 0x00; // value not relevant during authentication procedure
+			msg.TXsender = 0; // value not relevant during authentication procedure
+			msg.data = challResponse; // contains: random 16 bytes + original challenge value
+
+			// We have nothing pending to send? (TXbase is 1 in that case)
+			if(authSync == 1)
+			{
+				msg.header |= CH_SYNC;
+			}
+
+			ctrl_stack_send_msg(&msg);
+		}
+		// receiving response to our response :)
+		// this means we are authenticated!
+		// also, here we need to check if Header has SYNC
+		else if(authPhase == 2)
 		{
-			ctrlCallbacks->auth_response(*(msg->data));
+			authMode = 0;
+
+			if((msg->header) & CH_SYNC)
+			{
+				TXserver = 0;
+			}
+			else
+			{
+				if(ctrlCallbacks->restore_TXserver != NULL)
+				{
+					TXserver = ctrlCallbacks->restore_TXserver();
+				}
+			}
+
+			if(ctrlCallbacks->auth_response != NULL)
+			{
+				ctrlCallbacks->auth_response();
+			}
 		}
 	}
 	else
@@ -199,6 +233,13 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 	while(processedLen < rxBuffLen)
 	{
 		unsigned short allLength = ctrl_find_message(rxBuff+processedLen, rxBuffLen-processedLen);
+
+		/*#ifdef CTRL_LOGGING
+			char tmp[80];
+			os_sprintf(tmp, "ctrl_find_message, allLength: (%d)\r\n", (allLength));
+			uart0_sendStr(tmp);
+		#endif*/
+
 		if(allLength > 0)
 		{
 			// entire message found in buffer, lets process it
@@ -213,7 +254,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 
 				char *msgPtr = rxBuff+processedLen+2; // skip the ALL_LENGTH field
 
-				#ifdef CTRL_LOGGING
+				/*#ifdef CTRL_LOGGING
 					char tmp[80];
 					os_sprintf(tmp, "unpacking %d bytes:", allLength);
 					uart0_sendStr(tmp);
@@ -226,19 +267,19 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 						uart0_sendStr(tmp2);
 					}
 					uart0_sendStr(".\r\n");
-				#endif
+				#endif*/
 
 				// Verify CMAC
 				char calculatedCmac[16];
-				cmac_generate(activeAes128Key, msgPtr, allLength-16, calculatedCmac);
+				cmac_generate(aes128Key, msgPtr, allLength-16, calculatedCmac);
 				if(os_strncmp(calculatedCmac, msgPtr+allLength-16, 16) == 0)
 				{
-					#ifdef CTRL_LOGGING
+					/*#ifdef CTRL_LOGGING
 						uart0_sendStr("CMAC VERIFIED!\r\n");
-					#endif
+					#endif*/
 
 					// Decrypt
-					aes128_cbc_decrypt(msgPtr, allLength-16, activeAes128Key);
+					aes128_cbc_decrypt(msgPtr, allLength-16, aes128Key);
 
 					msgPtr += 16; // skip IV
 
@@ -265,23 +306,23 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 					// Process
 					ctrl_stack_process_message(&msg);
 				}
-				#ifdef CTRL_LOGGING
+				/*#ifdef CTRL_LOGGING
 				else
 				{
 					uart0_sendStr("CMAC NOT VERIFIED!\r\n");
 				}
-				#endif
+				#endif*/
 			}
-			#ifdef CTRL_LOGGING
+			/*#ifdef CTRL_LOGGING
 			else
 			{
 				char tmp[80];
-				os_sprintf(tmp, "error, packet (%d) is not in 16 byte blocks!", allLength);
+				os_sprintf(tmp, "error, packet (%d) is not in 16 byte blocks!\r\n", allLength);
 				uart0_sendStr(tmp);
 			}
-			#endif
+			#endif*/
 
-			processedLen += allLength;
+			processedLen += allLength+2;
 			rxBuffLen = rxBuffLen-processedLen;
 		}
 		else
@@ -289,6 +330,12 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			// has remaining data in buffer (beginning of another message but not entire message)
 			if(rxBuffLen-processedLen > 0)
 			{
+				/*#ifdef CTRL_LOGGING
+					char tmp[80];
+					os_sprintf(tmp, "stack has remaining data in buffer (%d)\r\n", (rxBuffLen-processedLen));
+					uart0_sendStr(tmp);
+				#endif*/
+
 				os_timer_disarm(&tmrDataExpecter);
 				os_timer_arm(&tmrDataExpecter, TMR_DATA_EXPECTER_MS, 0); // 0 = do not repeat automatically
 
@@ -346,6 +393,20 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 		return 1;
 	}
 
+	char *activeAes128Key;
+
+	// Special situation: When we are currently in authMode and in authPhase==1 we need
+	// to use zero-aes128-key (key with all zeroes) to encrypt packet we are about to send.
+	char zeroAes128Key[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+	if(authMode && authPhase == 1)
+	{
+		activeAes128Key = zeroAes128Key;
+	}
+	else
+	{
+		activeAes128Key = aes128Key;
+	}
+
 	// Packet structure:
 	// [ALL_LENGTH] { [RANDOM_IV] [MESSAGE_LENGTH] [HEADER] [TX_SENDER] [DATA] [padding when needed] } [CMAC]
 	// 		2             16              2           1          4        n              m               16
@@ -401,11 +462,48 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 		toSendTempPtr += paddThisMuch;
 	}
 
+	/*#ifdef CTRL_LOGGING
+		uart0_sendStr("plaintext: ");
+
+		unsigned short i;
+		for(i=2; i<(toSendTempPtr-toSend); i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", toSend[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif*/
+
 	// Now encrypt the plaintext (but skip first 2 bytes of [ALL_LENGTH])
 	aes128_cbc_encrypt(toSend+2, (toSendTempPtr-toSend-2), activeAes128Key);
 
+	/*#ifdef CTRL_LOGGING
+		uart0_sendStr("encrypted: ");
+
+		for(i=2; i<(toSendTempPtr-toSend); i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", toSend[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif*/
+
 	// Now calculate CMAC over entire ciphertext (but skip first 2 bytes of [ALL_LENGTH]) and place it at the last 16 bytes of toSend!
 	cmac_generate(activeAes128Key, toSend+2, (toSendTempPtr-toSend-2), toSendTempPtr);
+
+	/*#ifdef CTRL_LOGGING
+		uart0_sendStr("CMAC: ");
+
+		for(i=0; i<16; i++)
+		{
+			char tmp2[10];
+			os_sprintf(tmp2, " 0x%X", toSendTempPtr[i]);
+			uart0_sendStr(tmp2);
+		}
+		uart0_sendStr(".\r\n");
+	#endif*/
 
 	// prepare IV for next encryption (lets use last 16 bytes, actually that's the CMAC of current encryption... this is supposed to be "safe to do" in AES-CBC mode)
 	os_memcpy(random16bytes, toSendTempPtr, 16);
@@ -453,37 +551,15 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 	baseid = baseid_;
 	aes128Key = aes128Key_;
 
-	activeAes128Key = (char *)&authAes128Key; // active key during AUTH is all zeroes (don't worry, it is not as dangerous as it sounds)
-
 	authMode = 1; // used in our local ctrl_stack_process_message() to know how to parse incoming data from server
-
-	// !!!!!!!!!!!!!!!
-	// IMPORTANT TODO: MAKE SOME KIND OF ENCRYPTED CHALLANGE-RESPONSE AUTHENTICATION
-	// !!!!!!!!!!!!!!!
-
-	char authStream[48];
-	os_memcpy(authStream, baseid, 16);
-	os_memcpy(authStream+32, baseid, 16);
-	unsigned char i = 0;
-	for(i=0; i<4; i++)
-	{
-		unsigned long r = system_get_time() + rand(); // TODO: make better random generation here? system_get_time() will have only one value in this loop...
-		os_memcpy(authStream+16+(i*4), &r, 4);
-	}
-
-	aes128_cbc_encrypt(authStream+16, 32, aes128Key); // encrypt auth message with the secret key of Base
+	authPhase = 1;
+	authSync = sync;
 
 	tCtrlMessage msg;
-	msg.length = 1 + 4 + 48;
+	msg.length = 1 + 4 + 16;
 	msg.header = 0x00; // value not relevant during authentication procedure
 	msg.TXsender = 0; // value not relevant during authentication procedure
-	msg.data = authStream; //contains: baseid + encrypt(random 16 bytes + baseid)
-
-	// We have nothing pending to send? (TXbase is 1 in that case)
-	if(sync == 1)
-	{
-		msg.header |= CH_SYNC;
-	}
+	msg.data = baseid; //contains: baseid
 
 	// In case we already have something partial in rxBuff, we must free it since the remaining partial data will never arrive.
 	// We will never have this != NULL in case there was a full message available there, because it would be parsed at the time
@@ -496,6 +572,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_authorize(char *baseid_, char *aes128Key_, uns
 	}
 
 	// prepare IV for very first encryption of the "msg"
+	unsigned char i;
 	for(i=0; i<4; i++)
 	{
 		unsigned long r = rand(); // here this randomness is not *that* important since the authKey is known to everyone (zeroes)

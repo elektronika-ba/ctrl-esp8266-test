@@ -16,7 +16,7 @@ typedef struct {
 	void(*message_received)(tCtrlMessage *);
 	void(*message_acked)(tCtrlMessage *);
 	char(*send_data)(char *, unsigned short);
-	void(*auth_response)(unsigned char);
+	void(*auth_response)(void);
 	void(*save_TXserver)(unsigned long);
 	unsigned long(*restore_TXserver)(void);
 } tCtrlCallbacks;

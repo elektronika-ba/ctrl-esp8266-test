@@ -17,7 +17,7 @@ static void ICACHE_FLASH_ATTR ctrl_app_temperature_simulator_simulate(void *arg)
 	temper = rand();
 
 	// send via CTRL stack to Server
-	if(ctrl_platform_send((char *)&temper, 4, 1)) // send as notification
+	if(ctrl_platform_send((char *)&temper, 4, 0)) // send as notification
 	{
 		uart0_sendStr("> Failed to send the temperature!\r\n");
 	}
