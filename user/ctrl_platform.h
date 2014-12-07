@@ -66,8 +66,6 @@ static void ctrl_message_recv_cb(tCtrlMessage *);
 static void ctrl_message_ack_cb(tCtrlMessage *);
 static void ctrl_auth_response_cb(void);
 static char ctrl_send_data_cb(char *, unsigned short);
-static void ctrl_save_TXserver_cb(unsigned long);
-static unsigned long ctrl_restore_TXserver_cb(void);
 
 // public
 unsigned char ctrl_platform_send(char *, unsigned short, unsigned char);

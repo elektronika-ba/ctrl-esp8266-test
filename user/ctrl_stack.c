@@ -76,9 +76,11 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 
 			ctrl_stack_send_msg(&msg);
 		}
-		// receiving response to our response :)
-		// this means we are authenticated!
-		// also, here we need to check if Header has SYNC
+		// receiving reply to our response on server's challenge :)
+		// this means we are authenticated! here we get 4 bytes of data
+		// containing TXserver value we need to reload. it is saved on Server
+		// so that we don't wear out our Flash or EEPROM memory. cool feature, right?
+		// also, here we need to check if Header has SYNC so that we reset TXserver to 0
 		else if(authPhase == 2)
 		{
 			authMode = 0;
@@ -89,10 +91,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 			}
 			else
 			{
-				if(ctrlCallbacks->restore_TXserver != NULL)
-				{
-					TXserver = ctrlCallbacks->restore_TXserver();
-				}
+				os_memcpy(&TXserver, msg->data, 4);
 			}
 
 			if(ctrlCallbacks->auth_response != NULL)
@@ -123,6 +122,8 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 				ack.header |= CH_BACKOFF;
 			}
 			ack.TXsender = msg->TXsender;
+			ack.length = 1+4; // fixed ACK length, without payload (data)
+			char TXserver2Save[4]; // will need this bellow
 
 			// is this NOT a notification message?
 			if(!(msg->header & CH_NOTIFICATION))
@@ -149,15 +150,18 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
                 	ack.header |= CH_PROCESSED;
                 	TXserver++; // next package we will receive must be +1 of current value, so lets ++
 
-					// maybe there is a callback defined that will save this value in case we get power loss so server doesn't have to flush the pending queue when connection gets restored
-                	if(ctrlCallbacks->save_TXserver != NULL)
-                	{
-						ctrlCallbacks->save_TXserver(TXserver);
-					}
+					// Server offers us a feature to store a copy of this TXserver on his side so that
+					// we don't wear out our Flash or EEPROM memory, lets do that! Thanks Server :)
+					// Why are we saving this? We might get powered down and we must not loose this value!
+					// If we do, Server will send it to us when we (re-)connect! Cool.
+					ack.length += 4; // extend the length of this ACK because we are appending data as well
+					ack.header |= CH_SAVE_TXSERVER;
+
+					os_memcpy(&TXserver2Save, &TXserver, 4);
+					ack.data = TXserver2Save;
                 }
 
                 // send reply
-                ack.length = 1+4; // fixed ACK length, without payload (data)
                 ctrl_stack_send_msg(&ack);
 
                 //uart0_sendStr("ACKed to a msg!\r\n");
@@ -171,19 +175,13 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 			// received a message which is new and as expected?
 			if(ack.header & CH_PROCESSED)
 			{
-				if(msg->header & CH_SYSTEM_MESSAGE)
-				{
-					//uart0_sendStr("Got system message - NOT IMPLEMENTED!\r\n");
-				}
-				else
-				{
-					//uart0_sendStr("Got fresh message!\r\n");
+				//uart0_sendStr("Got fresh message!\r\n");
 
-					// push the received message to callback
-					if(ctrlCallbacks->message_received != NULL)
-					{
-						ctrlCallbacks->message_received(msg);
-					}
+				// 7-12-2014 pushing system messages to ctrl_platform.c!
+				// push the received message to callback
+				if(ctrlCallbacks->message_received != NULL)
+				{
+					ctrlCallbacks->message_received(msg);
 				}
 			}
 		}
@@ -422,6 +420,7 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 	}
 
 	char *toSend = (char *)os_zalloc(allocateThisMuch); // use os_zalloc for easier debugging
+	// failed to allocate? sorry...
 	if(toSend == NULL)
 	{
 		return 1;
@@ -449,7 +448,7 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 	toSendTempPtr += 4;
 
 	// Copy msg.data (if any)
-	if(msg->length-5 > 0)
+	if((unsigned int)msg->length - 5 > 0)
 	{
 		os_memcpy(toSendTempPtr, msg->data, msg->length-5);
 		toSendTempPtr += msg->length-5;

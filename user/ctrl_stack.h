@@ -17,8 +17,6 @@ typedef struct {
 	void(*message_acked)(tCtrlMessage *);
 	char(*send_data)(char *, unsigned short);
 	void(*auth_response)(void);
-	void(*save_TXserver)(unsigned long);
-	unsigned long(*restore_TXserver)(void);
 } tCtrlCallbacks;
 
 // CTRL Protocol Header Field bits
@@ -29,7 +27,7 @@ typedef struct {
 #define CH_NOTIFICATION 	0x10
 #define CH_SYSTEM_MESSAGE 	0x20
 #define CH_BACKOFF 			0x40
-#define CH_RESERVED 		0x80
+#define CH_SAVE_TXSERVER	0x80
 
 // private
 static unsigned short ctrl_find_message(char *, unsigned short);

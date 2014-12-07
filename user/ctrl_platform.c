@@ -32,7 +32,6 @@ os_timer_t tmrLinker;
 static unsigned char tcpReconCount;
 static tCtrlConnState connState = CTRL_WIFI_CONNECTING;
 
-static unsigned long gTXserver;
 os_timer_t tmrStatusLedBlinker;
 os_timer_t tmrStatusLedBlinkerFlash;
 tCtrlSetup ctrlSetup;
@@ -345,11 +344,43 @@ static void ICACHE_FLASH_ATTR ctrl_message_recv_cb(tCtrlMessage *msg)
 	// to re-send that message and postpone sending any following messages
 	// untill we call ctrl_stack_backoff(0);
 
-	// push message to ctrl-user-application
-	if(ctrlAppCallbacks.message_received != NULL)
+	// Don't push system messages to user app, they are for private
+	// communication between Base (us) and Server. There is no problem
+	// in sending these system messages to user app though, I just don't
+	// think it is neccessary right now. We will see in future.
+	if(msg->header & CH_SYSTEM_MESSAGE)
 	{
-		unsigned char backoff = ctrlAppCallbacks.message_received(msg);
-		ctrl_stack_backoff(backoff);
+		// we received a system message here. we need to check what this is
+		// because it might be new timestamp, or some server-stored-variable
+		// we previously requested!
+
+		// Recently requested variable is arriving from Server?
+		if(msg->data[0] == 0x05)
+		{
+			// we have a Variable!
+			char variableId[4];
+			char variableValue[4];
+			os_memcpy(variableId, msg->data+1, 4);
+			os_memcpy(variableValue, msg->data+5, 4);
+
+			// do something with this Variable+Value that arrived
+		}
+		// Recently requested timestamp is arriving from Server?
+		else if(msg->data[0] == 0x06)
+		{
+			// we have Timestamp!
+
+			// do something with this Timestamp that arrived (format: YYYY MM DD HH MM SS DAY-OF-WEEK(1-7))
+		}
+	}
+	else
+	{
+		// push message to ctrl-user-application
+		if(ctrlAppCallbacks.message_received != NULL)
+		{
+			unsigned char backoff = ctrlAppCallbacks.message_received(msg);
+			ctrl_stack_backoff(backoff);
+		}
 	}
 }
 
@@ -424,34 +455,23 @@ static void ICACHE_FLASH_ATTR ctrl_message_ack_cb(tCtrlMessage *msg)
 
 static void ICACHE_FLASH_ATTR ctrl_auth_response_cb()
 {
-	// auth_err = 0x00 (AUTH OK) or 0x01 (AUTH ERROR)
-	/*if(auth_err)
-	{
-		#ifdef CTRL_LOGGING
-			uart0_sendStr("CTRL AUTH ERR!\r\n");
-		#endif
-		connState = CTRL_AUTHENTICATION_ERROR;
-	}
-	else
-	{*/
-		#ifdef CTRL_LOGGING
-			uart0_sendStr("CTRL Authenticated!\r\n");
-		#endif
+	#ifdef CTRL_LOGGING
+		uart0_sendStr("CTRL Authenticated!\r\n");
+	#endif
 
-		connState = CTRL_AUTHENTICATED;
-		ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
+	connState = CTRL_AUTHENTICATED;
+	ctrl_stack_keepalive(1); // lets enable keepalive for our connection because that's what all cool kids do these days
 
-		ctrlSynchronized = 1;
+	ctrlSynchronized = 1;
 
-		#ifdef USE_DATABASE_APPROACH
-			if(ctrl_database_count_unacked_items() > 0)
-			{
-				// start sending pending data right now
-				os_timer_disarm(&tmrDatabaseItemSender);
-				os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
-			}
-		#endif
-	/*}*/
+	#ifdef USE_DATABASE_APPROACH
+		if(ctrl_database_count_unacked_items() > 0)
+		{
+			// start sending pending data right now
+			os_timer_disarm(&tmrDatabaseItemSender);
+			os_timer_arm(&tmrDatabaseItemSender, TMR_ITEMS_SENDER_MS, 0); // 0 = don't repeat automatically
+		}
+	#endif
 }
 
 static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
@@ -468,8 +488,7 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 		return ESPCONN_CONN;
 	}
 
-	/*
-	#ifdef CTRL_LOGGING
+	/*#ifdef CTRL_LOGGING
 		uart0_sendStr("TCP SENDING:");
 		unsigned short i;
 		for(i=0; i<len; i++)
@@ -479,25 +498,9 @@ static char ICACHE_FLASH_ATTR ctrl_send_data_cb(char *data, unsigned short len)
 			uart0_sendStr(tmp2);
 		}
 		uart0_sendStr(".\r\n");
-	#endif
-	*/
+	#endif*/
 
 	return espconn_sent(&ctrlConn, data, len);
-}
-
-static void ICACHE_FLASH_ATTR ctrl_save_TXserver_cb(unsigned long TXserver)
-{
-	// we don't store TXserver in FLASH as it would wear out the FLASH memory... don't know how to handle this. Maybe save every other value and in different locations?
-	// by saving every other value system would still work since it is configured to try re-sending 3 times until flushing all data
-
-	gTXserver = TXserver; // for now, store it in RAM
-}
-
-static unsigned long ICACHE_FLASH_ATTR ctrl_restore_TXserver_cb(void)
-{
-	// since we don't store it, we don't load it either :-)
-
-	return gTXserver; // for now, return the last one we had from RAM
 }
 
 // all user CTRL messages is sent to Server through this function
@@ -701,8 +704,6 @@ void ICACHE_FLASH_ATTR ctrl_platform_init(void)
 		ctrlCallbacks.send_data = &ctrl_send_data_cb; // when CTRL stack wants to send some data to socket it will use this function
 		ctrlCallbacks.auth_response = &ctrl_auth_response_cb; // when CTRL stack gets an authentication response from Server it will call this function
 		ctrlCallbacks.message_acked = &ctrl_message_ack_cb; // when CTRL stack receives an acknowledgement for a message it previously sent it will call this function
-		ctrlCallbacks.save_TXserver = &ctrl_save_TXserver_cb; // when CTRL stack receives data from Server and increases the TXserver value, it will call this function in case we want to store it in FLASH/EEPROM/NVRAM memory
-		ctrlCallbacks.restore_TXserver = &ctrl_restore_TXserver_cb; // when CTRL stack authenticates and in case when Server doesn't want us to re-sync, we must load TXserver from FLASH/EEPROM/NVRAM in order to continue receiving messages. For that, CTRL stack will call this function and read the value we provide to it
 		ctrl_stack_init(&ctrlCallbacks);
 
 		// Init the user-app callbacks
