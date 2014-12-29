@@ -7,10 +7,9 @@
 
 void user_init(void)
 {
+	#ifdef CTRL_LOGGING
 	uart_init(BIT_RATE_115200);
 	os_delay_us(1000);
-
-	#ifdef CTRL_LOGGING
 	os_printf("\r\nCTRL platform starting...\r\n");
 	#endif
 
