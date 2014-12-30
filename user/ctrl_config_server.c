@@ -28,16 +28,13 @@ static struct espconn esp_conn;
 static esp_tcp esptcp;
 static unsigned char killConn;
 static unsigned char returnToNormalMode;
-// http headers
-static const char *http404Header = "HTTP/1.0 404 Not Found\r\nServer: CTRL-Config-Server/0.1\r\nContent-Type: text/plain\r\n\r\nNot Found (or method not implemented).\r\n";
-static const char *http200Header = "HTTP/1.0 200 OK\r\nServer: CTRL-Config-Server/0.1\r\nContent-Type: text/html\r\n";
 // html page header and footer
 static const char *pageStart = "<html><head><title>CTRL Base Config</title><style>body{font-family: Arial}</style></head><body><form method=\"get\" action=\"/\"><input type=\"hidden\" name=\"save\" value=\"1\">\r\n";
 static const char *pageEnd = "</form><hr><a href=\"https://my.ctrl.ba\" target=\"_blank\"><i>my.ctrl.ba</i></a>\r\n</body></html>\r\n";
 // html pages (NOTE: make sure you don't have the '{' without the closing '}' !
 static const char *pageIndex = "<h2>Welcome to CTRL Base Config</h2><ul><li><a href=\"?page=wifi\">WIFI Settings</a></li><li><a href=\"?page=ctrl\">CTRL Settings</a></li><li><a href=\"?page=return\">Return Normal Mode</a></li></ul>\r\n";
-static char *pageSetWifi = "<h2><a href=\"/\">Home</a> / WIFI Settings</h2><input type=\"hidden\" name=\"page\" value=\"wifi\"><table border=\"0\"><tr><td><b>SSID:</b></td><td><input type=\"text\" name=\"ssid\" value=\"{ssid}\" size=\"40\"></td></tr><tr><td><b>Password:</b></td><td><input type=\"text\" name=\"pass\" value=\"***\" size=\"40\"></td></tr><tr><td><b>Status:</b></td><td>{status} <a href=\"?page=wifi\">[refresh]</a></td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td></tr></table>\r\n";
-static char *pageSetCtrl = "<h2><a href=\"/\">Home</a> / CTRL Settings</h2><input type=\"hidden\" name=\"page\" value=\"ctrl\"><table border=\"0\"><tr><td><b>Base ID:</b></td><td><input type=\"text\" name=\"baseid\" value=\"{baseid}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>AES-128 Key:</b></td><td><input type=\"text\" name=\"crypt\" value=\"{crypt}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>Server IP:</b></td><td><input type=\"text\" name=\"ip\" value=\"{ip}\" size=\"18\"></td><td>(78.47.48.138)</td></tr><tr><td><b>Port:</b></td><td><input type=\"text\" name=\"port\" value=\"{port}\" size=\"5\"></td><td>(8000)</td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td><td></td></tr></table>\r\n";
+static const char *pageSetWifi = "<h2><a href=\"/\">Home</a> / WIFI Settings</h2><input type=\"hidden\" name=\"page\" value=\"wifi\"><table border=\"0\"><tr><td><b>SSID:</b></td><td><input type=\"text\" name=\"ssid\" value=\"{ssid}\" size=\"40\"></td></tr><tr><td><b>Password:</b></td><td><input type=\"text\" name=\"pass\" value=\"***\" size=\"40\"></td></tr><tr><td><b>Status:</b></td><td>{status} <a href=\"?page=wifi\">[refresh]</a></td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td></tr></table>\r\n";
+static const char *pageSetCtrl = "<h2><a href=\"/\">Home</a> / CTRL Settings</h2><input type=\"hidden\" name=\"page\" value=\"ctrl\"><table border=\"0\"><tr><td><b>Base ID:</b></td><td><input type=\"text\" name=\"baseid\" value=\"{baseid}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>AES-128 Key:</b></td><td><input type=\"text\" name=\"crypt\" value=\"{crypt}\" size=\"40\"></td><td>(get from <a href=\"https://my.ctrl.ba\" target=\"_blank\">my.ctrl.ba</a>)</td></tr><tr><td><b>Server IP:</b></td><td><input type=\"text\" name=\"ip\" value=\"{ip}\" size=\"18\"></td><td>(78.47.48.138)</td></tr><tr><td><b>Port:</b></td><td><input type=\"text\" name=\"port\" value=\"{port}\" size=\"5\"></td><td>(8000)</td></tr><tr><td></td><td><input type=\"submit\" value=\"Save\"></td><td></td></tr></table>\r\n";
 static const char *pageResetStarted = "<h1>Returning to Normal Mode...</h1>You can close this window now.\r\n";
 static const char *pageSavedInfo = "<br><b style=\"color: green\">Settings Saved!</b>\r\n";
 
@@ -150,6 +147,7 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct HttpdConnDa
 	httpdEndHeaders(conn);
 	// page header
 	char buff[1024];
+	char html_buff[1024];
 	int len;
 	len = os_sprintf(buff, pageStart);
 	if(!httpdSend(conn, buff, len)) {
@@ -190,8 +188,8 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct HttpdConnDa
 			wifi_station_get_config(&stationConf);
 		}
 
-		pageSetWifi = str_replace(pageSetWifi, "{ssid}", stationConf.ssid);
-		pageSetWifi = str_replace(pageSetWifi, "{pass}", stationConf.password);
+		os_sprintf(html_buff, "%s", str_replace(pageSetWifi, "{ssid}", stationConf.ssid));
+		os_sprintf(html_buff, "%s", str_replace(html_buff, "{pass}", stationConf.password));
 		char status[32];
 		int x = wifi_station_get_connect_status();
 		if (x == STATION_GOT_IP)
@@ -214,17 +212,17 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct HttpdConnDa
 		{
 			os_sprintf(status, "Not Connected");
 		}
-		pageSetWifi = str_replace(pageSetWifi, "{status}", status);
+		os_sprintf(html_buff, "%s", str_replace(html_buff, "{status}", status));
 
 		// was saving?
 		if(save[0] == '1')
 		{
 			char buff_saved[512];
-			os_sprintf(buff_saved, "%s%s", pageSetWifi, pageSavedInfo);
+			os_sprintf(buff_saved, "%s%s", html_buff, pageSavedInfo);
 			len = os_sprintf(buff, buff_saved);
 			httpdSend(conn, buff, len);
 		} else {
-			len = os_sprintf(buff, pageSetWifi);
+			len = os_sprintf(buff, html_buff);
 			httpdSend(conn, buff, len);
 		}
 
@@ -293,27 +291,27 @@ static void ICACHE_FLASH_ATTR ctrl_config_server_process_page(struct HttpdConnDa
 		char i;
 		char *result;
 		bin2strhex((char *)ctrlSetup.baseid, sizeof(ctrlSetup.baseid), &result);
-		pageSetCtrl = str_replace(pageSetCtrl, "{baseid}", result);
+		os_sprintf(html_buff, "%s", str_replace(pageSetCtrl, "{baseid}", result));
 		os_free(result);
 		bin2strhex((char *)ctrlSetup.aes128Key, sizeof(ctrlSetup.aes128Key), &result);
-		pageSetCtrl = str_replace(pageSetCtrl, "{crypt}", result);
+		os_sprintf(html_buff, "%s", str_replace(html_buff, "{crypt}", result));
 		os_free(result);
 		char serverIp[16];
 		os_sprintf(serverIp, "%u.%u.%u.%u", ctrlSetup.serverIp[0], ctrlSetup.serverIp[1], ctrlSetup.serverIp[2], ctrlSetup.serverIp[3]);
-		pageSetCtrl = str_replace(pageSetCtrl, "{ip}", serverIp);
+		os_sprintf(html_buff, "%s", str_replace(html_buff, "{ip}", serverIp));
 		char serverPort[6];
 		os_sprintf(serverPort, "%u", ctrlSetup.serverPort);
-		pageSetCtrl = str_replace(pageSetCtrl, "{port}", serverPort);
+		os_sprintf(html_buff, "%s", str_replace(html_buff, "{port}", serverPort));
 
 		// was saving?
 		if( save[0] == '1' )
 		{
 			char buff_saved[1024];
-			os_sprintf(buff_saved, "%s%s", pageSetCtrl, pageSavedInfo);
+			os_sprintf(buff_saved, "%s%s", html_buff, pageSavedInfo);
 			len = os_sprintf(buff, buff_saved);
 			httpdSend(conn, buff, len);
 		} else {
-			len = os_sprintf(buff, pageSetCtrl);
+			len = os_sprintf(buff, html_buff);
 			httpdSend(conn, buff, len);
 		}
 
@@ -553,7 +551,7 @@ static void ICACHE_FLASH_ATTR httpdRetireConn(HttpdConnData *conn) {
 }
 
 // You must free the result if result is non-NULL.
-char *str_replace(char *orig, char *rep, char *with) {
+char *str_replace(const char *orig, char *rep, char *with) {
     char *result; // the return string
     char *ins;    // the next insert point
     char *tmp;    // varies
@@ -571,7 +569,7 @@ char *str_replace(char *orig, char *rep, char *with) {
         with = "";
     len_with = strlen(with);
 
-    ins = orig;
+    ins = (char*)orig;
     for (count = 0; tmp = strstr(ins, rep); ++count) {
         ins = tmp + len_rep;
     }

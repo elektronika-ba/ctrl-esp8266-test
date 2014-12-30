@@ -31,7 +31,7 @@ void httpdStartResponse(HttpdConnData *conn, int code);
 void httpdHeader(HttpdConnData *conn, const char *field, const char *val);
 void httpdEndHeaders(HttpdConnData *conn);
 static void httpdRetireConn(HttpdConnData *conn);
-char *str_replace(char *orig, char *rep, char *with);
+char *str_replace(const char *orig, char *rep, char *with);
 void bin2strhex(unsigned char *bin, unsigned int binsz, char **result);
 
 // public
