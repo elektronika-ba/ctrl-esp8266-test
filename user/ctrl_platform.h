@@ -4,6 +4,8 @@
 #include "c_types.h"
 #include "ctrl_stack.h"
 
+int os_printf(const char *format, ...)  __attribute__ ((format (printf, 1, 2)));
+
 // When defined, will spit out logging messages on UART.
 #define CTRL_LOGGING
 

@@ -131,7 +131,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 				if (msg->TXsender <= TXserver)
                 {
                     ack.header &= ~CH_PROCESSED;
-                    //uart0_sendStr("ERROR: Re-transmitted message, ignoring!\r\n");
+                    //os_printf("ERROR: Re-transmitted message, ignoring!\r\n");
                 }
                 else if (msg->TXsender > (TXserver + 1))
                 {
@@ -143,7 +143,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 
                     ack.header |= CH_OUT_OF_SYNC;
                     ack.header &= ~CH_PROCESSED;
-                    //uart0_sendStr("ERROR: Out-of-sync message!\r\n");
+                    //os_printf("ERROR: Out-of-sync message!\r\n");
                 }
                 else
                 {
@@ -164,18 +164,18 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
                 // send reply
                 ctrl_stack_send_msg(&ack);
 
-                //uart0_sendStr("ACKed to a msg!\r\n");
+                //os_printf("ACKed to a msg!\r\n");
 			}
 			else
 			{
 				ack.header |= CH_PROCESSED; // need this for code bellow to execute
-				//uart0_sendStr("Didn't ACK because this is a notification-type msg!\r\n");
+				//os_printf("Didn't ACK because this is a notification-type msg!\r\n");
 			}
 
 			// received a message which is new and as expected?
 			if(ack.header & CH_PROCESSED)
 			{
-				//uart0_sendStr("Got fresh message!\r\n");
+				//os_printf("Got fresh message!\r\n");
 
 				// 7-12-2014 pushing system messages to ctrl_platform.c!
 				// push the received message to callback
@@ -191,7 +191,7 @@ static void ICACHE_FLASH_ATTR ctrl_stack_process_message(tCtrlMessage *msg)
 // data expecter timeout, in case it triggers things aren't going well
 static void ICACHE_FLASH_ATTR data_expecter_timeout(void *arg)
 {
-	uart0_sendStr("data_expecter_timeout() - FLUSH RX BUFF\r\n");
+	os_printf("data_expecter_timeout() - FLUSH RX BUFF\r\n");
 	if(rxBuff != NULL)
 	{
 		os_free(rxBuff);
@@ -235,7 +235,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 		/*#ifdef CTRL_LOGGING
 			char tmp[80];
 			os_sprintf(tmp, "ctrl_find_message, allLength: (%d)\r\n", (allLength));
-			uart0_sendStr(tmp);
+			os_printf(tmp);
 		#endif*/
 
 		if(allLength > 0)
@@ -255,16 +255,16 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 				/*#ifdef CTRL_LOGGING
 					char tmp[80];
 					os_sprintf(tmp, "unpacking %d bytes:", allLength);
-					uart0_sendStr(tmp);
+					os_printf(tmp);
 
 					unsigned short i;
 					for(i=0; i<(allLength); i++)
 					{
 						char tmp2[10];
 						os_sprintf(tmp2, " 0x%X", msgPtr[i]);
-						uart0_sendStr(tmp2);
+						os_printf(tmp2);
 					}
-					uart0_sendStr(".\r\n");
+					os_printf(".\r\n");
 				#endif*/
 
 				// Verify CMAC
@@ -273,7 +273,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 				if(os_strncmp(calculatedCmac, msgPtr+allLength-16, 16) == 0)
 				{
 					/*#ifdef CTRL_LOGGING
-						uart0_sendStr("CMAC VERIFIED!\r\n");
+						os_printf("CMAC VERIFIED!\r\n");
 					#endif*/
 
 					// Decrypt
@@ -307,7 +307,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 				/*#ifdef CTRL_LOGGING
 				else
 				{
-					uart0_sendStr("CMAC NOT VERIFIED!\r\n");
+					os_printf("CMAC NOT VERIFIED!\r\n");
 				}
 				#endif*/
 			}
@@ -316,7 +316,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 			{
 				char tmp[80];
 				os_sprintf(tmp, "error, packet (%d) is not in 16 byte blocks!\r\n", allLength);
-				uart0_sendStr(tmp);
+				os_printf(tmp);
 			}
 			#endif*/
 
@@ -331,7 +331,7 @@ void ICACHE_FLASH_ATTR ctrl_stack_recv(char *data, unsigned short len)
 				/*#ifdef CTRL_LOGGING
 					char tmp[80];
 					os_sprintf(tmp, "stack has remaining data in buffer (%d)\r\n", (rxBuffLen-processedLen));
-					uart0_sendStr(tmp);
+					os_printf(tmp);
 				#endif*/
 
 				os_timer_disarm(&tmrDataExpecter);
@@ -462,46 +462,46 @@ static unsigned char ICACHE_FLASH_ATTR ctrl_stack_send_msg(tCtrlMessage *msg)
 	}
 
 	/*#ifdef CTRL_LOGGING
-		uart0_sendStr("plaintext: ");
+		os_printf("plaintext: ");
 
 		unsigned short i;
 		for(i=2; i<(toSendTempPtr-toSend); i++)
 		{
 			char tmp2[10];
 			os_sprintf(tmp2, " 0x%X", toSend[i]);
-			uart0_sendStr(tmp2);
+			os_printf(tmp2);
 		}
-		uart0_sendStr(".\r\n");
+		os_printf(".\r\n");
 	#endif*/
 
 	// Now encrypt the plaintext (but skip first 2 bytes of [ALL_LENGTH])
 	aes128_cbc_encrypt(toSend+2, (toSendTempPtr-toSend-2), activeAes128Key);
 
 	/*#ifdef CTRL_LOGGING
-		uart0_sendStr("encrypted: ");
+		os_printf("encrypted: ");
 
 		for(i=2; i<(toSendTempPtr-toSend); i++)
 		{
 			char tmp2[10];
 			os_sprintf(tmp2, " 0x%X", toSend[i]);
-			uart0_sendStr(tmp2);
+			os_printf(tmp2);
 		}
-		uart0_sendStr(".\r\n");
+		os_printf(".\r\n");
 	#endif*/
 
 	// Now calculate CMAC over entire ciphertext (but skip first 2 bytes of [ALL_LENGTH]) and place it at the last 16 bytes of toSend!
 	cmac_generate(activeAes128Key, toSend+2, (toSendTempPtr-toSend-2), toSendTempPtr);
 
 	/*#ifdef CTRL_LOGGING
-		uart0_sendStr("CMAC: ");
+		os_printf("CMAC: ");
 
 		for(i=0; i<16; i++)
 		{
 			char tmp2[10];
 			os_sprintf(tmp2, " 0x%X", toSendTempPtr[i]);
-			uart0_sendStr(tmp2);
+			os_printf(tmp2);
 		}
-		uart0_sendStr(".\r\n");
+		os_printf(".\r\n");
 	#endif*/
 
 	// prepare IV for next encryption (lets use last 16 bytes, actually that's the CMAC of current encryption... this is supposed to be "safe to do" in AES-CBC mode)
