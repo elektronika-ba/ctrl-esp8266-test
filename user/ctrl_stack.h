@@ -35,7 +35,6 @@ static void ctrl_stack_process_message(tCtrlMessage *);
 static unsigned char ctrl_stack_send_msg(tCtrlMessage *);
 
 // public
-void reverse_buffer(char *, unsigned short);
 void ctrl_stack_backoff(unsigned char);
 void ctrl_stack_keepalive(unsigned char);
 unsigned char ctrl_stack_send(char *, unsigned short, unsigned long, unsigned char);
